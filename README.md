@@ -50,6 +50,19 @@ Through FUSE on a shared CI runner (details and caveats in
 (ext4: 199 MB/s), 1.4–2.2 k fsync-durable 4 KiB writes/s (ext4: 2.7 k), small-file
 creation 1.8× faster than ext4 (batched group commit).
 
+## Observability and deployment
+
+`walfs mount -metrics :9100` serves Prometheus metrics (`/metrics`: commit-latency
+histogram, journal fill, free space, dirty data, cache size, op/byte counters) and a
+`/healthz` probe that turns unhealthy if the filesystem latches read-only after an I/O
+error. A `Dockerfile` and `deploy/k8s/walfs.yaml` (PVC-backed Deployment with probes and
+scrape annotations) are exercised in CI: the image is run with `/dev/fuse`, written
+through, scraped, restarted with data intact, and deployed to a kind cluster.
+
+**Known limitation:** go-fuse does not forward `SYNCFS`, so `sync(2)` does not force a
+journal commit; durability is bounded by `fsync` or the `-commit` interval (default 5 s,
+like ext4).
+
 ## Layout
 
 ```
