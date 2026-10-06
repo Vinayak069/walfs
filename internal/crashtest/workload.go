@@ -47,10 +47,11 @@ type GenConfig struct {
 	SyncPercent int    // chance (per mille) of a sync op
 	Sparse      bool   // allow rare writes far past EOF (double-indirect blocks)
 	NoSnapshots bool   // never create, delete or read snapshots
-	// NoCompound forbids operations that the runner executes as several engine
-	// calls (writing to a missing path = create + write). Crash tests need it:
-	// a commit may legitimately land between the two calls, which is a valid
-	// on-disk state but not an operation boundary of the model.
+	// NoCompound forbids operations that execute as several separately
+	// committable steps: writing to a missing path (create + write) and
+	// fallocate ranges longer than one write chunk. Crash tests need this: a
+	// background commit may legitimately land between the steps, which is a
+	// valid on-disk state but not an operation boundary of the model.
 	NoCompound bool
 }
 
@@ -257,6 +258,9 @@ func (g *Gen) Next(m *model.Model) Op {
 		sz := sizes[op.A]
 		op.Off = uint64(g.rng.Int63n(int64(sz) + 16384))
 		op.Len = uint64(1 + g.rng.Intn(65536))
+		if g.cfg.NoCompound {
+			op.Len = uint64(1 + g.rng.Intn(40000)) // within one chunk (15 blocks) of the test journal
+		}
 		op.Mode = pick(g, []uint32{0, 0, 1, 1, 3})
 		if g.cfg.NoOverwrite && op.Mode&2 != 0 {
 			op.Mode = 1
