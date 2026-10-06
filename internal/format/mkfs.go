@@ -14,6 +14,8 @@ type MkfsOptions struct {
 	JournalBlocks uint64 // 0: size/32 clamped to [128, 32768] blocks
 	AssumeZero    bool   // device is freshly created/sparse: skip zeroing the journal
 	Now           int64  // 0: time.Now()
+	RootUID       uint32 // owner of the root directory
+	RootGID       uint32
 }
 
 // Geometry computes the superblock for a device of the given size.
@@ -129,7 +131,7 @@ func Mkfs(dev blockdev.Device, o MkfsOptions) (*Superblock, error) {
 	// an inode slot is only ever read after its bitmap bit is set).
 	tbl := make([]byte, BlockSize)
 	root := Inode{
-		Mode: SIFDIR | 0o755, Nlink: 2, Size: BlockSize, Blocks: 1,
+		Mode: SIFDIR | 0o755, UID: o.RootUID, GID: o.RootGID, Nlink: 2, Size: BlockSize, Blocks: 1,
 		Atime: now, Mtime: now, Ctime: now, Crtime: now, Gen: 1,
 	}
 	root.Direct[0] = uint32(rootBlk)

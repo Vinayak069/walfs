@@ -79,6 +79,8 @@ func cmdMkfs(args []string) {
 	size := fl.String("size", "1G", "image size when IMAGE is a regular file")
 	jb := fl.Uint64("journal-blocks", 0, "journal size in 4 KiB blocks (default: 1/32 of the device, 128..32768)")
 	inodes := fl.Uint("inodes", 0, "number of inodes (default: one per 16 KiB)")
+	ruid := fl.Int("root-uid", os.Getuid(), "owner uid of the root directory (default: you)")
+	rgid := fl.Int("root-gid", os.Getgid(), "owner gid of the root directory (default: your group)")
 	_ = fl.Parse(args)
 	if fl.NArg() != 1 {
 		usage()
@@ -104,7 +106,7 @@ func cmdMkfs(args []string) {
 	}
 	defer dev.Close()
 	sb, err := format.Mkfs(dev, format.MkfsOptions{
-		Inodes: uint32(*inodes), JournalBlocks: *jb,
+		Inodes: uint32(*inodes), JournalBlocks: *jb, RootUID: uint32(*ruid), RootGID: uint32(*rgid),
 		AssumeZero: func() bool { st, err := os.Stat(path); return err == nil && st.Mode().IsRegular() }(),
 	})
 	if err != nil {
