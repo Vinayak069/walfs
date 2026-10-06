@@ -1,0 +1,71 @@
+name: bench
+
+on:
+  workflow_dispatch:
+    inputs:
+      size_gb:
+        description: backing image size (GiB)
+        default: "4"
+
+jobs:
+  fio:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Install fio and FUSE
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq fio fuse3 e2fsprogs
+      - name: Build
+        run: go build -o walfs ./cmd/walfs
+      - name: Describe machine
+        run: |
+          uname -a; nproc; free -g | head -2; df -h "$RUNNER_TEMP" | tail -1; fio --version
+      - name: Benchmark walfs (ordered journal) over FUSE
+        run: |
+          set -e
+          IMG=$RUNNER_TEMP/walfs.img; MNT=$RUNNER_TEMP/mnt-walfs; mkdir -p $MNT results
+          ./walfs mkfs -size ${{ inputs.size_gb }}G $IMG
+          ./walfs mount -journal ordered $MNT $IMG & sleep 2
+          mountpoint $MNT
+          scripts/bench.sh walfs-ordered $MNT results
+          fusermount3 -u $MNT; wait
+          ./walfs fsck $IMG
+          rm -f $IMG
+      - name: Benchmark walfs (data journal) over FUSE
+        run: |
+          set -e
+          IMG=$RUNNER_TEMP/walfs.img; MNT=$RUNNER_TEMP/mnt-walfs; mkdir -p $MNT
+          ./walfs mkfs -size ${{ inputs.size_gb }}G $IMG
+          ./walfs mount -journal data $MNT $IMG & sleep 2
+          scripts/bench.sh walfs-data $MNT results
+          fusermount3 -u $MNT; wait
+          ./walfs fsck $IMG
+          rm -f $IMG
+      - name: Benchmark ext4 (loop device, same backing storage)
+        run: |
+          set -e
+          IMG=$RUNNER_TEMP/ext4.img; MNT=$RUNNER_TEMP/mnt-ext4; mkdir -p $MNT
+          truncate -s ${{ inputs.size_gb }}G $IMG
+          mkfs.ext4 -q -F $IMG
+          sudo mount -o loop $IMG $MNT; sudo chown $USER $MNT
+          scripts/bench.sh ext4 $MNT results
+          sudo umount $MNT; rm -f $IMG
+      - name: Benchmark tmpfs
+        run: |
+          set -e
+          MNT=$RUNNER_TEMP/mnt-tmpfs; mkdir -p $MNT
+          sudo mount -t tmpfs -o size=3g tmpfs $MNT; sudo chown $USER $MNT
+          scripts/bench.sh tmpfs $MNT results
+          sudo umount $MNT
+      - name: Summarise
+        run: |
+          python3 scripts/summarize.py results | tee summary.md
+          cat summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: fio-results
+          path: |
+            results
+            summary.md
