@@ -14,14 +14,18 @@ run() { # name, args...
   echo "== $LABEL: $name"
   $FIO --name="$name" --directory="$DIR/bench" --output-format=json --output="$OUT/$LABEL/$name.json" \
        --group_reporting --ioengine=psync --randrepeat=0 "$@" >/dev/null
+  # Keep the working set small: free the job's files (read jobs need their
+  # own, so the data is laid out afresh by the next read job).
+  case $name in seq_write) ;; *) rm -f "$DIR"/bench/"$name".* ;; esac
 }
 
 run seq_write   --rw=write     --bs=1M --size=1G --numjobs=1 --end_fsync=1
 drop_caches
-run seq_read    --rw=read      --bs=1M --size=1G --numjobs=1
+run seq_read    --rw=read      --bs=1M --size=1G --numjobs=1 --filename="$DIR/bench/seq_write.0.0"
+rm -f "$DIR"/bench/seq_write.*
 drop_caches
-run rand_read   --rw=randread  --bs=4k --size=512M --numjobs=4 --time_based --runtime=20 --ramp_time=3
-run rand_write  --rw=randwrite --bs=4k --size=512M --numjobs=4 --time_based --runtime=20 --ramp_time=3 --end_fsync=1
+run rand_read   --rw=randread  --bs=4k --size=256M --numjobs=4 --time_based --runtime=20 --ramp_time=3
+run rand_write  --rw=randwrite --bs=4k --size=256M --numjobs=4 --time_based --runtime=20 --ramp_time=3 --end_fsync=1
 # One synchronous commit per write: measures the cost of the journal commit path.
 run fsync_write --rw=randwrite --bs=4k --size=64M  --numjobs=1 --fsync=1 --time_based --runtime=20 --ramp_time=2
 run fsync_append --rw=write    --bs=4k --size=64M  --numjobs=1 --fsync=1 --time_based --runtime=20 --ramp_time=2
