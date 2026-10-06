@@ -13,6 +13,16 @@ jobs:
           go-version-file: go.mod
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq fio fuse3 e2fsprogs
       - run: go build -o walfs ./cmd/walfs
+      - name: Raw disk ceiling for the commit write pattern
+        run: |
+          # Random 4 KiB writes with a flush every 8192 writes: what commit does to the disk.
+          mkdir -p $RUNNER_TEMP/raw
+          for fs in 1 8192; do
+            fio --name=raw$fs --directory=$RUNNER_TEMP/raw --rw=randwrite --bs=4k --size=1G --ioengine=psync \
+                --numjobs=1 --fdatasync=$fs --time_based --runtime=15 --ramp_time=2 --output-format=json --output=raw$fs.json >/dev/null
+            python3 -c "import json;d=json.load(open('raw$fs.json'))['jobs'][0]['write'];print('raw disk, fdatasync every $fs writes: %.0f IOPS' % d['iops'])" | tee -a raw.txt
+          done
+          cat raw.txt >> "$GITHUB_STEP_SUMMARY"
       - name: A/B
         run: |
           nproc; free -g | head -2
@@ -21,4 +31,6 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: ab
-          path: out
+          path: |
+            out
+            raw.txt
