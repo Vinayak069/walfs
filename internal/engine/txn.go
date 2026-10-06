@@ -49,9 +49,15 @@ func (fs *FS) metaBuf(blk uint64) (*buf, error) {
 		// The block is about to change for the first time in this
 		// transaction: snapshots that still see its current contents get a
 		// copy first. b.data is the last committed image here.
+		//
+		// Pin the buffer before preserving: making the copy allocates, and
+		// allocation may evict unpinned cache entries, including this one.
+		// joinTxn does not touch the contents, so b.data stays the old image.
+		fs.joinTxn(b)
 		if err := fs.preserve(uint32(blk), b.data, true); err != nil {
 			return nil, err
 		}
+		return b, nil
 	}
 	fs.joinTxn(b)
 	return b, nil

@@ -55,3 +55,22 @@ func TestENOSPCConsistency(t *testing.T) {
 		})
 	}
 }
+
+// Compare the live tree and every snapshot after *every* operation, so a
+// divergence is pinned to the exact operation that caused it.
+func TestDifferentialSnapshotsTight(t *testing.T) {
+	for _, mode := range []engine.JournalMode{engine.ModeOrdered, engine.ModeData} {
+		for seed := int64(1); seed <= 4; seed++ {
+			t.Run(fmt.Sprintf("%s/seed%d", mode, seed), func(t *testing.T) {
+				t.Parallel()
+				cfg := DefaultDiff(seed, mode)
+				cfg.Ops = 500
+				cfg.SnapshotEvery = 1
+				cfg.RemountEvery = 120
+				if err := RunDifferential(cfg); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}

@@ -124,6 +124,12 @@ func (fs *FS) preserveData(b *buf) error {
 	if fs.snapMask == 0 || b.isData || b.inTxn {
 		return nil // already preserved (or not needed) earlier in this transaction
 	}
+	if fs.snapNeeds(uint32(b.blk)) == 0 {
+		return nil
+	}
+	// Pin first (see metaBuf): the copy allocates, which may evict unpinned
+	// buffers. Pinning does not change the contents.
+	fs.dirtyData(b)
 	return fs.preserve(uint32(b.blk), b.data, false)
 }
 

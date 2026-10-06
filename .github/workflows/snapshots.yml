@@ -15,4 +15,4 @@ jobs:
       - name: Snapshot unit tests
         run: go test ./internal/engine -run Snapshot -count=1 -v -timeout 10m
       - name: Differential + ENOSPC tests (snapshots in the workload)
-        run: go test ./internal/crashtest -run 'Differential|ENOSPC' -short -count=1 -timeout 20m
+        run: go test ./internal/crashtest -run 'Differential|ENOSPC' -count=1 -timeout 20m

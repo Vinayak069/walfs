@@ -27,7 +27,8 @@ type DiffConfig struct {
 // DefaultDiff returns a configuration that is fast and exercises the interesting paths.
 func DefaultDiff(seed int64, mode engine.JournalMode) DiffConfig {
 	return DiffConfig{
-		Gen:           GenConfig{Seed: seed, Sparse: true},
+		// Snapshots need a journal.
+		Gen:           GenConfig{Seed: seed, Sparse: true, NoSnapshots: mode == engine.ModeNone},
 		Ops:           1500,
 		Mode:          mode,
 		ImageBlocks:   16384,
