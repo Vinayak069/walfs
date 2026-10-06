@@ -4,7 +4,7 @@ import json, pathlib, sys
 
 root = pathlib.Path(sys.argv[1])
 labels = sorted(p.name for p in root.iterdir() if p.is_dir())
-order = ["walfs-ordered", "walfs-data", "ext4", "tmpfs"]
+order = ["walfs-ordered", "walfs-ordered-snap", "walfs-data", "ext4", "tmpfs"]
 labels = [l for l in order if l in labels] + [l for l in labels if l not in order]
 jobs = ["seq_write", "seq_read", "rand_read", "rand_write", "fsync_write", "fsync_append", "small_files"]
 

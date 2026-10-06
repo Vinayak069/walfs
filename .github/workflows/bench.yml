@@ -43,6 +43,26 @@ jobs:
           fusermount3 -u $MNT; wait
           ./walfs fsck $IMG
           rm -f $IMG
+      - name: Benchmark walfs (ordered) with an active snapshot, and snapshot cost
+        run: |
+          set -e
+          IMG=$RUNNER_TEMP/walfs.img; MNT=$RUNNER_TEMP/mnt-walfs; mkdir -p $MNT
+          ./walfs mkfs -size ${{ inputs.size_gb }}G $IMG
+          ./walfs mount -journal ordered $MNT $IMG & sleep 2
+          # Populate ~1.5 GiB so that creation time can be seen to be independent of data size.
+          mkdir $MNT/pre && for i in 1 2 3; do dd if=/dev/urandom of=$MNT/pre/f$i bs=1M count=512 status=none; done
+          sync; sleep 6
+          t0=$(date +%s%N); mkdir $MNT/.snapshots/bench; t1=$(date +%s%N)
+          echo "snapshot create on ~1.5 GiB of data: $(( (t1-t0)/1000000 )) ms" | tee snapcost.txt
+          scripts/bench.sh walfs-ordered-snap $MNT results
+          # Deleting the snapshot returns the space preserved while the benchmark ran.
+          df -B1M $MNT | tail -1 | tee -a snapcost.txt
+          t0=$(date +%s%N); rmdir $MNT/.snapshots/bench; t1=$(date +%s%N)
+          echo "snapshot delete (after the benchmark overwrote data under it): $(( (t1-t0)/1000000 )) ms" | tee -a snapcost.txt
+          df -B1M $MNT | tail -1 | tee -a snapcost.txt
+          fusermount3 -u $MNT; wait
+          ./walfs fsck $IMG
+          rm -f $IMG
       - name: Benchmark ext4 (loop device, same backing storage)
         run: |
           set -e
@@ -62,6 +82,7 @@ jobs:
       - name: Summarise
         run: |
           python3 scripts/summarize.py results | tee summary.md
+          cat snapcost.txt >> "$GITHUB_STEP_SUMMARY"
           cat summary.md >> "$GITHUB_STEP_SUMMARY"
       - uses: actions/upload-artifact@v4
         with:
@@ -69,3 +90,4 @@ jobs:
           path: |
             results
             summary.md
+            snapcost.txt
