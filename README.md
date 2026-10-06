@@ -22,6 +22,9 @@ walfs fsck disk.img            # offline consistency check
   `EXCHANGE`, directory moves, cycle prevention), hard & symbolic links, truncate,
   `fallocate` (allocate / keep-size / punch-hole), `SEEK_DATA/SEEK_HOLE`, `fsync`,
   open-but-unlinked files (persistent orphan list), `statfs`, READDIRPLUS.
+* **Copy-on-write snapshots** (up to 32): O(bitmap) creation, read-only browsable views
+  under `MOUNT/.snapshots/` (`mkdir` creates, `rmdir` deletes), space-efficient
+  preserve-before-modify with transfer-on-free, resumable deletion.
 * Journal: commit protocol with two barriers, lazy checkpointing, revoke records,
   idempotent recovery, wrap-around circular log, bounded multi-transaction truncates.
 * Verification (see [docs/DESIGN.md](docs/DESIGN.md)):
@@ -37,6 +40,7 @@ walfs fsck disk.img            # offline consistency check
 | crash simulator, `ordered` and `data` | every simulated power loss recovers to an exact operation-boundary state no older than the last fsync; recovery is itself crash-safe |
 | negative controls (no journal; ignored flushes) | the simulator *does* detect broken designs |
 | `kill -9` of the live FUSE daemon, 25 rounds ordered + 15 rounds data | all 8 448 fsync-acknowledged files intact after recovery; fsck clean every round |
+| snapshots: deep-copy model comparison after every operation, snapshot-aware fsck, crash simulation incl. mid-deletion, `kill -9` with snapshots | frozen views stay exactly frozen; no leaked or doubly owned blocks; crash-safe creation and deletion |
 | race detector run, `gofmt`, `go vet` | |
 
 The simulator found a **real recovery bug** during development (freed directory/symlink

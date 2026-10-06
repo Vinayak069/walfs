@@ -83,6 +83,69 @@ when the transaction fills, when too much data is dirty, or every 5 s (configura
 Unlinked-but-open files live on a persistent **orphan list** so that space is reclaimed
 after a crash; large deletes/truncates proceed in bounded steps, each a consistent state.
 
+## Snapshots
+
+walfs supports up to 32 **copy-on-write snapshots**: instant, read-only, point-in-time
+views of the whole filesystem, created and deleted while mounted.
+
+```
+mkdir  MOUNT/.snapshots/before-upgrade     # create   (hidden directory, like ZFS's .zfs)
+ls     MOUNT/.snapshots/before-upgrade     # browse   (read-only)
+rmdir  MOUNT/.snapshots/before-upgrade     # delete
+```
+
+### How it works (block level, O(bitmap) creation)
+
+* **Capture.** Creating a snapshot commits the journal, then copies the *block allocation
+  bitmap* (the "captured set": 128 KiB per 4 GiB). No file data or inodes are copied, so
+  creation cost is independent of how much data exists.
+* **Preserve before modify.** When a captured block is about to change for the first time
+  (an overwritten data block, a directory block, an indirect block, an inode-table block),
+  its old contents are first copied to a fresh block `P` and a record `{X → P, mask}` is
+  appended to a persistent **COW log**; `mask` is the set of snapshots that see `P` where
+  they refer to `X`. Because the copy happens in the same transaction as the change, the
+  two are atomic with respect to crashes, and in `ordered` mode the copy is flushed before
+  the commit record like any other ordered data.
+* **Transfer on free.** A captured block that is *freed* rather than overwritten (unlink,
+  truncate) is not released: it stays allocated and a record `{X → X, mask}` hands it to the
+  snapshots. Space returns when the last snapshot that needs it is deleted.
+* **Reads.** A snapshot is exposed as a *block device translation* (`snapDev`): logical
+  block `X` reads from `P` if a record says so, from the live block otherwise (it has not
+  changed since). The ordinary engine code (lookup, readdir, read, …) runs unmodified on top
+  of it in read-only mode, so a snapshot is a real filesystem, not a special case.
+* **Deletion** clears the snapshot's bit from every record and releases records whose mask
+  becomes empty. It proceeds in bounded transactions; a half-deleted snapshot is marked
+  *deleting*, is invisible, and is finished at the next mount.
+* **Never preserved:** the superblock, journal and bitmaps. A view needs none of them, and
+  excluding them avoids recursion (preserving a bitmap block would allocate, which modifies
+  a bitmap block).
+* **Space safety.** Every operation checks up front that enough spare blocks exist for the
+  copies it might need, so it fails cleanly with `ENOSPC` instead of half-way. (As on ZFS, a
+  nearly full filesystem with snapshots can refuse deletions until a snapshot is removed.)
+
+### A bug the tests caught
+Making a preserved copy allocates a block, and allocation can evict unpinned cache entries —
+including the buffer that was just fetched for modification and not yet pinned into the
+transaction. It was then re-read stale from disk, so data seemed to revert. The randomized
+differential test pinned it to an exact operation; the fix is to pin before preserving.
+
+### Verification
+* A **deep-copy model**: the model snapshots its whole state at `CreateSnapshot`, and after
+  every operation the tests require every snapshot view to equal the model's frozen copy
+  while the live tree keeps matching the live model.
+* **fsck** checks the snapshot table and capture bitmaps, the COW log (record sanity, no two
+  records for the same block and snapshot, unique ownership of every preserved block), that
+  every allocated block is owned by exactly one of {live tree, snapshot machinery, preserved
+  copy}, and then runs the *complete* filesystem check on every snapshot through its
+  translated view (every block a snapshot references must have been allocated at capture
+  time and must still exist, unchanged or preserved).
+* The **power-failure simulator** includes snapshot create/delete/read in its workload, so
+  recovered images must contain exactly the snapshots (with exactly the contents) of some
+  operation-boundary model state; a dedicated test crashes at every point of a
+  multi-transaction deletion.
+* On a real mount, a `kill -9` test creates snapshots while overwriting files, then
+  verifies after recovery that every acknowledged snapshot shows the tree as it was.
+
 ## Verification
 
 Correctness is established by testing against independent oracles rather than by trust:
