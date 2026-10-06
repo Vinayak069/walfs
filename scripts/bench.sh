@@ -3,7 +3,7 @@
 # Every job ends with an fsync (end_fsync=1) so that buffered writes are charged
 # for durability, which is what a journaling filesystem is for.
 set -euo pipefail
-LABEL=$1; DIR=$2; OUT=$3
+LABEL=$1; DIR=$2; OUT=$(realpath -m "$3")
 FIO=${FIO:-fio}
 mkdir -p "$OUT/$LABEL" "$DIR/bench"
 cd "$DIR/bench"
