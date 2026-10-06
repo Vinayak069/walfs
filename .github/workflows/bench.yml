@@ -5,7 +5,7 @@ on:
     inputs:
       size_gb:
         description: backing image size (GiB)
-        default: "4"
+        default: "6"
 
 jobs:
   fio:
