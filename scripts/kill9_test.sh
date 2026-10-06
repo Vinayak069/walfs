@@ -39,6 +39,41 @@ except OSError:
     pass                       # the daemon was killed under us
 PY
 
+cat > "$W/verify.py" <<'PY'
+import os, sys, hashlib, random
+mnt, ack = sys.argv[1], sys.argv[2]
+bad = 0
+cache = {}
+def expected(rnd, idx):
+    # Regenerate exactly what writer.py wrote for file idx of round rnd.
+    if rnd not in cache:
+        cache[rnd] = (random.Random(rnd), [])
+    rng, seq = cache[rnd]
+    while len(seq) <= idx:
+        seq.append(rng.randbytes(rng.choice([100, 5000, 70000, 400000])))
+    return seq[idx]
+for line in open(ack):
+    path, want = line.split()
+    try:
+        got = open(mnt + path, "rb").read()
+    except OSError as e:
+        print(f"LOST {path}: {e}"); bad += 1; continue
+    if hashlib.sha256(got).hexdigest() == want:
+        continue
+    bad += 1
+    rnd = int(path.split("/")[1][5:]); idx = int(path.rsplit("/f", 1)[1])
+    exp = expected(rnd, idx)
+    first = next((i for i in range(min(len(got), len(exp))) if got[i] != exp[i]), None)
+    diff = [i for i in range(min(len(got), len(exp))) if got[i] != exp[i]]
+    zero = sum(1 for i in diff if got[i] == 0)
+    print(f"CORRUPT {path}: want {len(exp)} bytes, got {len(got)}; first diff at {first}; "
+          f"{len(diff)} differing bytes ({zero} are zero in the file); "
+          f"diff range {diff[0] if diff else None}..{diff[-1] if diff else None}")
+    print(f"  expected bytes at first diff: {exp[first:first+8].hex() if first is not None else '-'}, "
+          f"found: {got[first:first+8].hex() if first is not None else '-'}")
+sys.exit(1 if bad else 0)
+PY
+
 total=0
 for r in $(seq "$ROUNDS"); do
   mount_fs
@@ -51,16 +86,12 @@ for r in $(seq "$ROUNDS"); do
   sleep 0.2
   # Remount => journal recovery, then verify.
   mount_fs
-  bad=0; n=0
-  while read -r path sum; do
-    n=$((n+1))
-    got=$(sha256sum "$MNT$path" 2>/dev/null | cut -d' ' -f1 || true)
-    if [ "$got" != "$sum" ]; then echo "ROUND $r: $path lost or corrupt (want $sum got $got)"; bad=$((bad+1)); fi
-  done < "$ACK"
+  n=$(wc -l < "$ACK"); bad=0
+  python3 "$W/verify.py" "$MNT" "$ACK" || bad=1
   total=$n
   fusermount3 -u "$MNT"; wait "$DPID" 2>/dev/null || true
   "$BIN" fsck "$IMG" >/dev/null || { "$BIN" fsck "$IMG"; exit 1; }
-  [ "$bad" -eq 0 ] || { echo "FAILED: $bad acknowledged files missing/corrupt"; exit 1; }
+  [ "$bad" -eq 0 ] || { echo "FAILED round $r: acknowledged files missing/corrupt"; cat "$W/daemon.log" | tail -20; exit 1; }
   echo "round $r ok: $n acknowledged files verified after kill -9 + recovery"
 done
 echo "PASS: $ROUNDS kill -9 rounds, $total acknowledged-durable files, fsck clean every time"
