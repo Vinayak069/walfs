@@ -1,7 +1,7 @@
-4 KiB random overwrites of existing data, no snapshot:        8853 IOPS, 36.3 MB/s
-snapshot create on ~1.5 GiB of data: 2 ms
-same overwrites with a snapshot (every first touch copies):   6612 IOPS, 27.1 MB/s
-space preserved for the snapshot by those overwrites: 402 MiB
-same overwrites again (most blocks already copied):           8130 IOPS, 33.3 MB/s
-snapshot delete (after 510 MiB were preserved under it): 90 ms
-space returned by deleting the snapshot: 508 MiB
+4 KiB random overwrites of existing data, no snapshot:        10652 IOPS, 43.6 MB/s
+snapshot create on ~1.5 GiB of data: 3 ms
+same overwrites with a snapshot (every first touch copies):   10058 IOPS, 41.2 MB/s
+space preserved for the snapshot by those overwrites: 514 MiB
+same overwrites again (most blocks already copied):           10745 IOPS, 44.0 MB/s
+snapshot delete (after 516 MiB were preserved under it): 147 ms
+space returned by deleting the snapshot: 514 MiB

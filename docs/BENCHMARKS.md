@@ -1,61 +1,98 @@
 # Benchmarks
 
-Measured with fio 3.x on a GitHub-hosted `ubuntu-latest` runner (workflow `bench`, run
-`37484228423`), all four targets backed by the same runner disk: walfs mounted through
-FUSE from a 4 GiB image file, ext4 on a loop-mounted 4 GiB image, and tmpfs. Raw fio JSON
-is in [`results/fio-json`](results/fio-json); regenerate with
-`gh workflow run bench.yml` (nothing runs on a developer machine).
+Everything here was measured on GitHub-hosted `ubuntu-latest` runners (4 vCPU, network
+disk) by the workflows in `.github/workflows` (`bench`, `ab`, `perf`); nothing runs on a
+developer machine. Raw data: [`results/`](results/). All numbers are single runs on shared
+VMs, so expect noise of 5–15 %; comparisons between configurations are therefore made
+**back to back on the same runner** (`ab` workflow), not across runs.
 
-All jobs use the `psync` engine, buffered I/O, and `end_fsync=1`, so buffered writes are
-charged for durability. `rand_*` use 4 jobs × 256 MiB, 4 KiB blocks, 20 s; `fsync_*` issue
-one `fsync` after every 4 KiB write.
+walfs runs in user space behind FUSE, so every request that reaches the daemon crosses the
+kernel/user boundary twice. Workloads the kernel can answer from its page cache never reach
+it. Keep that in mind when reading the ext4 and tmpfs columns.
 
-| workload | metric | walfs (ordered) | walfs (data) | ext4 (loop) | tmpfs |
+## 1. Suite on the runner's disk (run `37538250521`)
+
+Image on the runner's disk (walfs: 4 GiB image file via FUSE; ext4: loop-mounted image on
+the same disk). Buffered I/O, `end_fsync=1`, `rand_*` = 4 jobs × 256 MiB × 20 s.
+
+| workload | walfs ordered | walfs ordered + snapshot active | walfs data | ext4 (loop) | tmpfs |
 |---|---|---|---|---|---|
-| seq write 1 GiB, 1 MiB blocks | throughput | **207 MB/s** | 105 MB/s | 199 MB/s | 7255 MB/s |
-| seq read | throughput | 2030 MB/s | 1867 MB/s | 7781 MB/s | 10527 MB/s |
-| rand read 4 KiB ×4 | IOPS | 33.3 k | 32.8 k | 84.5 k | 1045 k |
-| rand write 4 KiB ×4 | IOPS | 7.6 k | 7.1 k | 76.7 k | 888 k |
-| 4 KiB write + fsync (random) | fsyncs/s | 1367 | 1944 | 2653 | 472 k |
-| 4 KiB append + fsync | fsyncs/s | 1780 | 2231 | 2935 | 491 k |
-| 4000 × 4 KiB small files ×2 | IOPS | **3854** | 3964 | 2138 | 96 k |
+| seq write 1 GiB + fsync | 177 MB/s | 202 MB/s | 93 MB/s | 203 MB/s | 6711 MB/s |
+| seq read (cold) | 2045 MB/s | 2073 MB/s | 1959 MB/s | 7405 MB/s | 10527 MB/s |
+| rand read 4 KiB (cold) | 36.2 k IOPS | 36.5 k | 32.6 k | 83.9 k | 1031 k |
+| rand write 4 KiB | 9.4 k IOPS | 9.4 k | 8.0 k | 63.5 k | 844 k |
+| 4 KiB write + fsync, per second | 2226 | 2203 | 2377 | 2343 | 490 k |
+| 4 KiB append + fsync, per second | 2789 | 2710 | 2737 | 2502 | 495 k |
+| 4000 small files ×2 jobs | 3287 IOPS | 3324 | 3394 | 2019 | 95 k |
 
-## How to read this honestly
+**Durable workloads are the meaningful comparison**: sequential write with a closing fsync
+matches ext4, fsync-per-write is on par with ext4 (2.2–2.8 k/s on both), and small-file
+creation is 1.6× faster than ext4 (creates are batched into group commits).
 
-* **walfs runs in user space behind FUSE**; every request crosses the kernel↔daemon
-  boundary twice. That, not the on-disk design, dominates the gaps on random I/O and on
-  cached reads, and it is why walfs cannot approach tmpfs/ext4 there. Numbers are
-  best compared *between the two walfs journal modes* and against ext4 for the
-  durability-bound workloads.
-* **Durable workloads are the meaningful comparison.** Sequential write with a final
-  fsync matches ext4 (207 vs 199 MB/s) and fsync-per-write reaches 51–76 % of ext4's
-  rate (journal commit = log write + barrier + commit write + barrier).
-* Small-file creation beats ext4 on this setup because creates are batched into group
-  commits and metadata is written to the log sequentially.
-* `data` journaling halves sequential write throughput (data is written twice) but is
-  slightly *faster* for fsync-heavy small writes: one log append instead of data +
-  journal.
-* ext4's sequential-read figure is page-cache bound (`drop_caches` is best effort on a
-  shared runner), so it should not be read as disk speed.
-* Single run, shared VM: expect noise of several percent. The p99 latencies in the raw
-  JSON are completion latencies of the write syscall, not of the fsync.
+## 2. Why random write is "slow": the disk, not the filesystem
 
-## Snapshot cost
+The ext4 and tmpfs random-write numbers measure how fast the kernel can *dirty page-cache
+pages*; the data is never forced to disk during the 20 s run. walfs journals and flushes
+every transaction. The same write pattern that a commit produces (random 4 KiB writes with a
+flush every 8192 writes) run **directly on this runner's disk** (`ab` workflow, run
+`37530269741`):
 
-Same runner setup (run `37498492266`; raw text in [`results/snapshot-cost.txt`](results/snapshot-cost.txt)).
-A ~1.5 GiB filesystem, then random 4 KiB overwrites of one 512 MiB file that already
-existed when the snapshot was taken:
+| raw disk | IOPS |
+|---|---|
+| random 4 KiB write, `fdatasync` after every write | 2485 |
+| random 4 KiB write, `fdatasync` every 8192 writes | **6128** |
+
+walfs reaches ~9.4 k random-write IOPS on that disk, i.e. it is **at the hardware ceiling**
+for durable random writes. To expose the software ceiling, the same suite was run with the
+image on a RAM disk, back to back with the configurations that differ only in the commit
+pipeline and kernel write-back cache:
+
+| (IOPS unless noted) | old: sync commit, no write-back | async commit + write-back | ext4 on disk |
+|---|---|---|---|
+| **RAM-backed image**: random write | 49 577 | **118 725** | – |
+| RAM-backed: 4 KiB write + fsync | 19 127 | 17 458 | – |
+| RAM-backed: sequential write | 1196 MB/s | 1036 MB/s | – |
+| disk-backed: random write | 8330 | 9846 | 55–83 k (cached, see above) |
+| disk-backed: fsync write | 2360 | 2696 | 4469 |
+
+So on fast storage the pipelined commit (section 4) is **2.4× faster** on random writes and
+beats ext4-on-loop (83 k); on this slow disk everything is capped by the device.
+
+## 3. Snapshot cost (run `37538250521`)
+
+~1.5 GiB of data, then 4 KiB random overwrites of one 512 MiB file that existed when the
+snapshot was taken:
 
 | step | result |
 |---|---|
-| overwrites, no snapshot | 8,853 IOPS |
-| **snapshot creation** (1.5 GiB of data) | **2 ms** |
-| overwrites with the snapshot (every first touch copies the old block) | 6,612 IOPS (−25 %), 402 MiB preserved |
-| the same overwrites again (most blocks already copied) | 8,130 IOPS (−8 %) |
-| **snapshot deletion** (510 MiB preserved under it) | 90 ms, 508 MiB returned |
+| overwrites, no snapshot | 10 652 IOPS |
+| **snapshot creation** | **3 ms** |
+| overwrites with the snapshot (every first touch copies the old block) | 10 058 IOPS (−6 %), 514 MiB preserved |
+| the same overwrites again (blocks already copied) | 10 745 IOPS |
+| **snapshot deletion** (516 MiB preserved under it) | 147 ms, 514 MiB returned |
 
-Creation is O(block bitmap), not O(data): it copies a 128 KiB bitmap. The write penalty is
-the price of copy-on-write and is paid once per block per snapshot; an earlier run of the
-same job measured −9 % on the first pass, so expect run-to-run variance of that order.
-Workloads that only create new files (the main fio suite above, also run with a snapshot
-active as `walfs-ordered-snap`) are unaffected because new blocks were never captured.
+Creation copies a 128 KiB bitmap, independent of data size. Earlier runs measured the
+first-pass penalty between −6 % and −25 %; expect run-to-run variance of that order.
+
+## 4. What the profiling found (and fixed)
+
+Profiles come from `/debug/pprof` on the daemon under fio load (`perf` workflow).
+
+| finding | fix | effect |
+|---|---|---|
+| Commit held the global lock during disk I/O; the daemon was ~15 % busy while writers queued (1000+ s of mutex wait) | **pipelined commit**: freeze the transaction (copy block images) under the lock, write it without the lock, finalize under the lock; kernel write-back cache | random write 49.6 k → 118.7 k IOPS on fast storage |
+| `fsync` of one 4 KiB write spent ~40 % of CPU allocating/zeroing a 1 MiB log staging buffer per commit, plus GC | pooled staging buffers | fsync throughput ×2.2 |
+| In data-journal mode 98 % of CPU was cache eviction scanning an almost fully *pinned* cache on every allocation (quadratic) | bounded eviction work per call | sequential write 22 → 93 MB/s |
+| Reads re-fetched data the kernel already had | `FOPEN_KEEP_CACHE` + explicit data-cache control (the daemon is the only writer) | repeated reads: 0 daemon requests |
+
+Cold 4 KiB random reads are bound by FUSE round trips (~14 µs per request): the kernel
+serves cached reads without involving the daemon, but `fio` invalidates the cache before each
+job, so this benchmark always measures the cold path.
+
+## 5. Correctness is part of performance work
+
+Making commit asynchronous exposed three issues, all caught by the test suite rather than by
+users: a latent durability hole (a freed block's checkpoint image was discarded too early,
+which could lose committed data if a checkpoint advanced the log tail before the freeing
+transaction committed — it also existed in the old synchronous code on the log-full path), and
+two harness assumptions about what counts as one operation. See `docs/DESIGN.md`.

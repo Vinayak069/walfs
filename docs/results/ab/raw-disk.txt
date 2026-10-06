@@ -1,0 +1,2 @@
+raw disk, fdatasync every 1 writes: 2485 IOPS
+raw disk, fdatasync every 8192 writes: 6128 IOPS

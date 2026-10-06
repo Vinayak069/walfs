@@ -25,8 +25,9 @@ walfs fsck disk.img            # offline consistency check
 * **Copy-on-write snapshots** (up to 32): O(bitmap) creation, read-only browsable views
   under `MOUNT/.snapshots/` (`mkdir` creates, `rmdir` deletes), space-efficient
   preserve-before-modify with transfer-on-free, resumable deletion.
-* Journal: commit protocol with two barriers, lazy checkpointing, revoke records,
-  idempotent recovery, wrap-around circular log, bounded multi-transaction truncates.
+* Journal: commit protocol with two barriers, **pipelined commit** (disk I/O off the
+  filesystem lock, group commit), lazy checkpointing, revoke records, idempotent recovery,
+  wrap-around circular log, bounded multi-transaction truncates.
 * Verification (see [docs/DESIGN.md](docs/DESIGN.md)):
   differential testing against a model, a CrashMonkey-style crash simulator
   (including crashes *during recovery*), negative controls, ENOSPC testing, and a
@@ -41,6 +42,7 @@ walfs fsck disk.img            # offline consistency check
 | negative controls (no journal; ignored flushes) | the simulator *does* detect broken designs |
 | `kill -9` of the live FUSE daemon, 25 rounds ordered + 15 rounds data | all 8 448 fsync-acknowledged files intact after recovery; fsck clean every round |
 | snapshots: deep-copy model comparison after every operation, snapshot-aware fsck, crash simulation incl. mid-deletion, `kill -9` with snapshots | frozen views stay exactly frozen; no leaked or doubly owned blocks; crash-safe creation and deletion |
+| asynchronous (pipelined) commit: differential and concurrency stress tests under the **race detector**, power-failure simulation with background commits | the pipeline is as crash-safe as the synchronous commit; no data races |
 | race detector run, `gofmt`, `go vet` | |
 
 The simulator found a **real recovery bug** during development (freed directory/symlink
@@ -49,12 +51,21 @@ file data); see the design doc.
 
 ## Performance
 
-Through FUSE on a shared CI runner (details and caveats in
-[docs/BENCHMARKS.md](docs/BENCHMARKS.md)): **207 MB/s** sequential write with fsync
-(ext4: 199 MB/s), 1.4–2.2 k fsync-durable 4 KiB writes/s (ext4: 2.7 k), small-file
-creation 1.8× faster than ext4 (batched group commit). Snapshot creation takes **2 ms**
-on a 1.5 GiB filesystem (O(bitmap)); overwriting snapshotted data costs −8…−25 % throughput
-once per block (copy-on-write).
+Through FUSE on shared CI runners (details, raw data and caveats in
+[docs/BENCHMARKS.md](docs/BENCHMARKS.md)):
+
+* durable workloads are on par with ext4: **177–202 MB/s** sequential write with fsync
+  (ext4: 203), **2.2–2.8 k** fsync-durable 4 KiB writes/s (ext4: 2.3–2.5 k), small-file
+  creation **1.6× faster** than ext4 (group commit);
+* random 4 KiB writes reach the hardware ceiling of the runner's disk (~9.4 k IOPS vs a
+  measured raw-disk ceiling of ~6–10 k); on RAM-backed storage they run at **118.7 k IOPS**,
+  2.4× the previous synchronous commit and above ext4 on a loop device;
+* snapshot creation takes **3 ms** on a 1.5 GiB filesystem (O(bitmap)); overwriting
+  snapshotted data costs −6…−25 % throughput once per block (copy-on-write).
+
+Profiling under load found and fixed: commit I/O under the global lock (now a pipelined
+commit), a per-commit 1 MiB allocation (fsync ×2.2), and a quadratic cache-eviction scan
+(data-journal sequential write 22 → 93 MB/s).
 
 ## Observability and deployment
 
@@ -87,7 +98,7 @@ scripts, .github     fio suite, kill -9 test, CI workflows
 
 ```
 go build ./cmd/walfs
-go test ./...                    # full suite (several minutes; memory heavy: runs on CI)
+go test ./...                    # full suite (30+ minutes and memory heavy: runs on CI)
 go test -short ./...             # quick pass
 scripts/kill9_test.sh ./walfs 25 ordered
 ```

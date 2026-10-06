@@ -65,6 +65,40 @@ Every metadata update is a *transaction* of whole-block images:
   invalid one, then scrub the log head and persist the new tail. It is idempotent: a crash
   *during* recovery is handled by simply running it again (tested exhaustively).
 
+### Pipelined commit
+
+Commit is split so that disk I/O never happens under the filesystem lock:
+
+```
+freeze   (lock held)  copy the running transaction's block images, assign a sequence number
+                      and log space, start a new running transaction
+I/O      (lock free)  ordered data -> log blocks -> barrier -> commit block -> barrier
+finalize (lock held)  publish the images for checkpointing, release the transaction's freed
+                      blocks, unpin ordered-data buffers
+```
+
+There is one *running* and at most one *committing* transaction. Operations keep joining the
+running one while the previous one is written; `fsync` waits only for the commit that contains
+its operations, and `fsync`s that arrive meanwhile share the next commit (group commit). A
+soft threshold (a quarter of the log or dirty limit) starts committing early; only when the
+hard limit is reached does an operation wait, and then only for the in-flight commit's I/O.
+
+Details that make this safe:
+
+* The I/O works on private copies, so live buffers can be modified immediately. Committed
+  images are kept (in `ckptImg`) for the checkpoint instead of being read from live buffers.
+* Blocks freed by the running transaction stay unavailable until that transaction is durable
+  *and* the transaction in flight has finalized (`pendingFree` checks both).
+* A freed block's pending checkpoint image is discarded only when the **freeing transaction is
+  durable**, not when the block is freed. (Discarding it early could lose committed data: a
+  checkpoint may advance the log tail past the transaction that journaled the block before
+  the freeing transaction commits. This was found by the asynchronous crash test and also
+  existed in the old synchronous code on the log-full path.)
+* Checkpoint and log-full handling drain the in-flight commit first; they hold the lock.
+* `Options.AsyncCommit` turns the pipeline on; off, every commit completes before the call
+  returns, which makes device-event order deterministic for the crash simulator. Both modes
+  run through the same freeze/I/O/finalize code.
+
 ### Journal modes
 
 | mode | what is journaled | guarantee |
@@ -129,7 +163,20 @@ including the buffer that was just fetched for modification and not yet pinned i
 transaction. It was then re-read stale from disk, so data seemed to revert. The randomized
 differential test pinned it to an exact operation; the fix is to pin before preserving.
 
-### Verification
+### Performance engineering
+
+Measured with `pprof` under fio load (numbers in [BENCHMARKS.md](BENCHMARKS.md)):
+
+* The global lock held across commit I/O (fixed by the pipelined commit above).
+* A 1 MiB staging buffer allocated per commit (pooled): small commits are now cheap.
+* Cache eviction scanning an almost fully pinned cache on every allocation, quadratic in
+  data-journal mode (eviction work is now bounded per call; the cache may exceed its capacity
+  while buffers are pinned and shrinks again as commits and checkpoints release them).
+* FUSE-level: kernel write-back cache (the kernel coalesces and absorbs writes; `fsync`
+  still forces them through), `FOPEN_KEEP_CACHE` and explicit data-cache control (the daemon
+  is the only writer, so cached file data is never stale), symlink caching, 1 MiB readahead.
+
+## Verification
 * A **deep-copy model**: the model snapshots its whole state at `CreateSnapshot`, and after
   every operation the tests require every snapshot view to equal the model's frozen copy
   while the live tree keeps matching the live model.
@@ -139,7 +186,11 @@ differential test pinned it to an exact operation; the fix is to pin before pres
   copy}, and then runs the *complete* filesystem check on every snapshot through its
   translated view (every block a snapshot references must have been allocated at capture
   time and must still exist, unchanged or preserved).
-* The **power-failure simulator** includes snapshot create/delete/read in its workload, so
+* The **power-failure simulator** also runs with commits in the background (event order then
+  varies from run to run, but the recovered state must still be an exact operation-boundary
+  state). Its workloads avoid operations that execute as several separately committable steps
+  (create-then-write on a missing path, multi-chunk `fallocate`), because a commit may
+  legitimately land between the steps. It includes snapshot create/delete/read in its workload, so
   recovered images must contain exactly the snapshots (with exactly the contents) of some
   operation-boundary model state; a dedicated test crashes at every point of a
   multi-transaction deletion.
@@ -169,8 +220,19 @@ Correctness is established by testing against independent oracles rather than by
    a device that ignores flushes) must be detected as broken, proving the harness has teeth.
 
 ### Bugs found by verification
+* A freed block's checkpoint image was discarded when the block was freed instead of when the
+  freeing transaction became durable, so a checkpoint could advance the log tail and lose
+  committed data (found by the asynchronous crash test; see "Pipelined commit").
 * Freed directory/symlink blocks were not revoked, so crash recovery could replay a stale
   directory image over reused file data. (Found by the crash simulator; fixed by
   classifying freed blocks by inode type.)
 * Test-harness bugs that the oracles exposed in themselves (e.g. an "append-only"
   workload that silently overwrote through handles).
+
+### Concurrency testing
+A multi-goroutine stress test (workers with private models, concurrent readers and listers,
+a goroutine creating and deleting snapshots, background commits with a tiny cache and dirty
+limit) runs under the race detector in CI; so does the asynchronous differential test. It
+caught a deadlock in the test itself (a `Readdir` callback re-entering the filesystem takes a
+second read lock, which blocks as soon as a writer is waiting): the API now documents that
+callbacks must not call back into the filesystem.
