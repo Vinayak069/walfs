@@ -263,6 +263,42 @@ func (f *FS) ReadDir(_ <-chan struct{}, in *fuse.ReadIn, out *fuse.DirEntryList)
 	return st(err)
 }
 
+// ReadDirPlus returns entries together with their attributes, saving the
+// kernel a LOOKUP per file (this is what makes `ls -l` and `find` fast).
+// Every entry with a non-zero node id counts as a kernel lookup, so the engine
+// takes a reference for each; "." and ".." are returned with a zero node id,
+// which tells the kernel to skip them.
+func (f *FS) ReadDirPlus(_ <-chan struct{}, in *fuse.ReadIn, out *fuse.DirEntryList) fuse.Status {
+	type slot struct {
+		name string
+		eo   *fuse.EntryOut
+	}
+	var slots []slot
+	err := f.e.Readdir(in.NodeId, in.Offset, func(d engine.DirEntry) bool {
+		eo := out.AddDirLookupEntry(fuse.DirEntry{
+			Name: d.Name, Ino: d.Ino, Mode: uint32(d.Type) << 12, Off: d.Next,
+		})
+		if eo == nil {
+			return false
+		}
+		if d.Name != "." && d.Name != ".." {
+			slots = append(slots, slot{d.Name, eo})
+		}
+		return true
+	})
+	if err != nil {
+		return st(err)
+	}
+	// Fill in attributes outside the readdir critical section (Lookup takes
+	// the same lock). An entry removed in the meantime is left zeroed.
+	for _, sl := range slots {
+		if a, err := f.e.Lookup(in.NodeId, sl.name); err == nil {
+			f.fillEntry(sl.eo, a)
+		}
+	}
+	return fuse.OK
+}
+
 func (f *FS) StatFs(_ <-chan struct{}, in *fuse.InHeader, out *fuse.StatfsOut) fuse.Status {
 	s := f.e.StatFS()
 	*out = fuse.StatfsOut{
