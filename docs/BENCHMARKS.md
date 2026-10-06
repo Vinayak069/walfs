@@ -39,3 +39,23 @@ one `fsync` after every 4 KiB write.
   shared runner), so it should not be read as disk speed.
 * Single run, shared VM: expect noise of several percent. The p99 latencies in the raw
   JSON are completion latencies of the write syscall, not of the fsync.
+
+## Snapshot cost
+
+Same runner setup (run `37498492266`; raw text in [`results/snapshot-cost.txt`](results/snapshot-cost.txt)).
+A ~1.5 GiB filesystem, then random 4 KiB overwrites of one 512 MiB file that already
+existed when the snapshot was taken:
+
+| step | result |
+|---|---|
+| overwrites, no snapshot | 8,853 IOPS |
+| **snapshot creation** (1.5 GiB of data) | **2 ms** |
+| overwrites with the snapshot (every first touch copies the old block) | 6,612 IOPS (−25 %), 402 MiB preserved |
+| the same overwrites again (most blocks already copied) | 8,130 IOPS (−8 %) |
+| **snapshot deletion** (510 MiB preserved under it) | 90 ms, 508 MiB returned |
+
+Creation is O(block bitmap), not O(data): it copies a 128 KiB bitmap. The write penalty is
+the price of copy-on-write and is paid once per block per snapshot; an earlier run of the
+same job measured −9 % on the first pass, so expect run-to-run variance of that order.
+Workloads that only create new files (the main fio suite above, also run with a snapshot
+active as `walfs-ordered-snap`) are unaffected because new blocks were never captured.

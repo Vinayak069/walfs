@@ -52,7 +52,9 @@ file data); see the design doc.
 Through FUSE on a shared CI runner (details and caveats in
 [docs/BENCHMARKS.md](docs/BENCHMARKS.md)): **207 MB/s** sequential write with fsync
 (ext4: 199 MB/s), 1.4–2.2 k fsync-durable 4 KiB writes/s (ext4: 2.7 k), small-file
-creation 1.8× faster than ext4 (batched group commit).
+creation 1.8× faster than ext4 (batched group commit). Snapshot creation takes **2 ms**
+on a 1.5 GiB filesystem (O(bitmap)); overwriting snapshotted data costs −8…−25 % throughput
+once per block (copy-on-write).
 
 ## Observability and deployment
 
