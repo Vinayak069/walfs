@@ -69,7 +69,7 @@ type Options struct {
 	CommitInterval   time.Duration // background commit period; 0 disables the timer
 	CacheBlocks      int           // buffer cache capacity (default 32768 = 128 MiB)
 	DirtyLimitBlocks int           // commit when this many data blocks are dirty (default 8192 = 32 MiB)
-	Clock            func() int64  // nanosecond clock, injectable for tests
+	Clock            func() int64  // nanosecond clock, injectable for tests; must be safe for concurrent use (background commits call it)
 	ReadOnly         bool
 	// AsyncCommit lets commits run in the background so that operations
 	// continue while a transaction is being written (pipelined commit). With

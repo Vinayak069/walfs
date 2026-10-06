@@ -124,7 +124,7 @@ func RunCrash(cfg CrashConfig) (*CrashReport, error) {
 	}
 	rec := blockdev.NewRecording(mem)
 	rec.DropFlushes = cfg.DropFlushes
-	clk := &clockVar{v: 1000}
+	clk := newClock(1000)
 	rec.SetTag(-1)
 	fs, _, err := engine.Open(rec, cfg.opts(clk.now))
 	if err != nil {
@@ -145,7 +145,7 @@ func RunCrash(cfg CrashConfig) (*CrashReport, error) {
 	}
 	ses.snaps = append(ses.snaps, snap0)
 	for i := 0; i < cfg.Ops; i++ {
-		clk.v = 1000 + int64(i)*10
+		clk.set(1000 + int64(i)*10)
 		rec.SetTag(i)
 		op := g.Next(m)
 		rEng := er.Apply(op)

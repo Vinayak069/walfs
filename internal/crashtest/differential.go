@@ -3,6 +3,7 @@ package crashtest
 import (
 	"fmt"
 	"math/rand"
+	"sync/atomic"
 
 	"github.com/vinayak-singh/walfs/internal/blockdev"
 	"github.com/vinayak-singh/walfs/internal/engine"
@@ -41,9 +42,14 @@ func DefaultDiff(seed int64, mode engine.JournalMode) DiffConfig {
 	}
 }
 
-type clockVar struct{ v int64 }
+// clockVar is the tests' fake clock. It is atomic because a background commit
+// reads it (for the commit-block timestamp) while the test advances it.
+type clockVar struct{ v atomic.Int64 }
 
-func (c *clockVar) now() int64 { return c.v }
+func newClock(v int64) *clockVar { c := &clockVar{}; c.v.Store(v); return c }
+func (c *clockVar) now() int64   { return c.v.Load() }
+func (c *clockVar) set(v int64)  { c.v.Store(v) }
+func (c *clockVar) add(d int64)  { c.v.Add(d) }
 
 // RunDifferential executes the same random operations on the engine and the
 // model and returns an error describing the first divergence, fsck failure
@@ -53,7 +59,7 @@ func RunDifferential(cfg DiffConfig) (err error) {
 	if _, err := format.Mkfs(dev, format.MkfsOptions{AssumeZero: true, JournalBlocks: cfg.JournalBlocks, Inodes: 2048, Now: 1000}); err != nil {
 		return err
 	}
-	clk := &clockVar{v: 1000}
+	clk := newClock(1000)
 	open := func() (*engine.FS, error) {
 		fs, _, err := engine.Open(dev, engine.Options{
 			Mode: cfg.Mode, Clock: clk.now, CacheBlocks: cfg.CacheBlocks, DirtyLimitBlocks: cfg.DirtyLimit,
@@ -90,7 +96,7 @@ func RunDifferential(cfg DiffConfig) (err error) {
 		return nil
 	}
 	for i := 0; i < cfg.Ops; i++ {
-		clk.v = 1000 + int64(i)*10
+		clk.set(1000 + int64(i)*10)
 		op := g.Next(m)
 		hist = append(hist, fmt.Sprintf("#%d %s", i, op))
 		rEng := re.Apply(op)

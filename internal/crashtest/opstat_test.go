@@ -13,13 +13,13 @@ import (
 // each errno, to make sure the generator exercises success paths and the
 // interesting error paths rather than mostly ENOENT.
 func TestWorkloadCoverage(t *testing.T) {
-	clk := &clockVar{v: 1000}
+	clk := newClock(1000)
 	m := model.New(clk.now)
 	r := &Runner{FS: ModelVFS{m}}
 	g := NewGen(GenConfig{Seed: 7, Sparse: true})
 	stat := map[string]int{}
 	for i := 0; i < 20000; i++ {
-		clk.v += 10
+		clk.add(10)
 		op := g.Next(m)
 		res := r.Apply(op)
 		key := op.Kind + ":ok"

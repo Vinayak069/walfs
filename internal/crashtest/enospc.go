@@ -20,7 +20,7 @@ func RunENOSPC(seed int64, mode engine.JournalMode) error {
 	if _, err := format.Mkfs(dev, format.MkfsOptions{AssumeZero: true, JournalBlocks: 128, Inodes: 256}); err != nil {
 		return err
 	}
-	clk := &clockVar{v: 1}
+	clk := newClock(1)
 	fs, _, err := engine.Open(dev, engine.Options{Mode: mode, Clock: clk.now, CacheBlocks: 64, DirtyLimitBlocks: 32})
 	if err != nil {
 		return err
@@ -33,7 +33,7 @@ func RunENOSPC(seed int64, mode engine.JournalMode) error {
 	rm := &Runner{FS: ModelVFS{mdl}}
 	enospc := 0
 	for i := 0; i < 4000; i++ {
-		clk.v += 10
+		clk.add(10)
 		op := g.Next(mdl)
 		res := r.Apply(op)
 		if res.Err != nil {
