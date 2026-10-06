@@ -19,7 +19,7 @@ func TestSnapshotChunkedDeleteCrash(t *testing.T) {
 	for _, mode := range []engine.JournalMode{engine.ModeOrdered, engine.ModeData} {
 		t.Run(mode.String(), func(t *testing.T) {
 			dev := blockdev.NewMem(8192 * format.BlockSize)
-			if _, err := format.Mkfs(dev, format.MkfsOptions{AssumeZero: true, JournalBlocks: 512, Inodes: 256, Now: 1000}); err != nil {
+			if _, err := format.Mkfs(dev, format.MkfsOptions{AssumeZero: true, JournalBlocks: 128, Inodes: 256, Now: 1000}); err != nil {
 				t.Fatal(err)
 			}
 			opts := engine.Options{Mode: mode, CacheBlocks: 128, DirtyLimitBlocks: 64, Clock: fixedClock}
