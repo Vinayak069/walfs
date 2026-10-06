@@ -21,7 +21,8 @@ type Node struct {
 	Atime, Mtime, Ctime int64
 	Rdev                uint64
 	Link                string // symlink target
-	Data                []byte // regular-file contents
+	Data                []byte // regular-file contents (nil after Compact)
+	DataSum             [32]byte
 	Group               string // first path (sorted) sharing this inode: hard-link identity
 }
 
@@ -70,6 +71,7 @@ func TakeSnapshot(fs VFS, withTimes bool) (*Snapshot, error) {
 				}
 				off += uint64(k)
 			}
+			n.DataSum = sha256.Sum256(n.Data)
 		case format.SIFLNK:
 			t, err := fs.Readlink(ino)
 			if err != nil {
@@ -147,7 +149,7 @@ func (s *Snapshot) digestOpt(withData bool) [32]byte {
 		h.Write([]byte(n.Group))
 		h.Write([]byte{0})
 		if withData {
-			h.Write(n.Data)
+			h.Write(n.DataSum[:])
 		}
 	}
 	var out [32]byte
@@ -198,8 +200,12 @@ func Diff(a, b *Snapshot) string {
 		if x.Group != y.Group {
 			add("%q: hard-link group %q != %q", p, x.Group, y.Group)
 		}
-		if !bytes.Equal(x.Data, y.Data) {
-			add("%q: contents differ (%s)", p, firstDiff(x.Data, y.Data))
+		if x.DataSum != y.DataSum {
+			if x.Data != nil && y.Data != nil && !bytes.Equal(x.Data, y.Data) {
+				add("%q: contents differ (%s)", p, firstDiff(x.Data, y.Data))
+			} else {
+				add("%q: contents differ", p)
+			}
 		}
 	}
 	for _, p := range b.Paths {
@@ -227,3 +233,10 @@ func firstDiff(a, b []byte) string {
 }
 
 var _ = engine.Ctx{}
+
+// Compact drops file contents (keeping their hashes) to save memory.
+func (s *Snapshot) Compact() {
+	for _, n := range s.Nodes {
+		n.Data = nil
+	}
+}

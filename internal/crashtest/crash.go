@@ -92,6 +92,8 @@ type session struct {
 	cfg     CrashConfig
 	rec     *blockdev.RecordingDevice
 	digests [][32]byte // digests[k]: expected state after k completed ops
+	snaps   []*Snapshot  // compacted snapshots, for failure diagnostics
+	opText  []string
 	// minK[p]: lowest acceptable k for a crash after p events; computed from
 	// operations that completed (including their sync) by then.
 	syncs []syncMark
@@ -136,6 +138,8 @@ func RunCrash(cfg CrashConfig) (*CrashReport, error) {
 		return nil, err
 	}
 	ses.digests = append(ses.digests, ses.digest(snap0))
+	snap0.Compact()
+	ses.snaps = append(ses.snaps, snap0)
 	for i := 0; i < cfg.Ops; i++ {
 		clk.v = 1000 + int64(i)*10
 		rec.SetTag(i)
@@ -153,6 +157,9 @@ func RunCrash(cfg CrashConfig) (*CrashReport, error) {
 			return nil, err
 		}
 		ses.digests = append(ses.digests, ses.digest(s))
+		s.Compact()
+		ses.snaps = append(ses.snaps, s)
+		ses.opText = append(ses.opText, op.String())
 		if op.Kind == "sync" && rEng.Err == nil {
 			ses.syncs = append(ses.syncs, syncMark{ev: len(rec.Log()), k: i + 1})
 		}
@@ -444,8 +451,21 @@ func (s *session) mountCheck(img *blockdev.MemDevice, j job, lo, hi int, fail fu
 	return k, true
 }
 
-// explain gives a hint about how far a bad snapshot is from the nearest
-// acceptable state; it re-derives states lazily only on failure.
+// explain diffs a bad snapshot against the nearest acceptable state.
 func (s *session) explain(snap *Snapshot, lo, hi int) string {
-	return fmt.Sprintf("acceptable states k=%d..%d of %d", lo, hi, len(s.digests)-1)
+	best, bestK := "", -1
+	for k := lo; k <= hi && k < len(s.snaps); k++ {
+		d := Diff(s.snaps[k], snap)
+		if bestK < 0 || len(d) < len(best) {
+			best, bestK = d, k
+		}
+	}
+	prev, next := "", ""
+	if bestK >= 1 {
+		prev = s.opText[bestK-1]
+	}
+	if bestK >= 0 && bestK < len(s.opText) {
+		next = s.opText[bestK]
+	}
+	return fmt.Sprintf("nearest is state k=%d (after op [%s], before op [%s]); expected(first) vs actual(second):\n%s", bestK, prev, next, best)
 }
