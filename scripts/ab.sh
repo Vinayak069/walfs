@@ -33,6 +33,24 @@ for cfg in "sync-nowb:-async-commit=false -writeback=false" "sync-wb:-async-comm
   "$BIN" fsck /tmp/ab.img >/dev/null
 done
 
+# Software ceiling: the same suite with the image on a RAM disk, so the storage
+# device cannot be the limit.
+for cfg in "ram-sync-nowb:-async-commit=false -writeback=false" "ram-async-wb:-async-commit=true -writeback=true"; do
+  CFG=${cfg%%:*}; ARGS=${cfg#*:}
+  rm -f /dev/shm/ab.img; "$BIN" mkfs -size 3G /dev/shm/ab.img >/dev/null
+  mkdir -p /tmp/abm; "$BIN" mount $ARGS /tmp/abm /dev/shm/ab.img 2>"$OUT/$CFG.log" &
+  DPID=$!; sleep 2
+  echo "== $CFG ($ARGS)"
+  suite /tmp/abm
+  fusermount3 -u /tmp/abm; wait $DPID || true
+  rm -f /dev/shm/ab.img
+done
+CFG=tmpfs
+mkdir -p /tmp/tmpfsm; sudo mount -t tmpfs -o size=3g tmpfs /tmp/tmpfsm; sudo chown $USER /tmp/tmpfsm
+echo "== tmpfs"
+suite /tmp/tmpfsm
+sudo umount /tmp/tmpfsm
+
 CFG=ext4
 truncate -s 4G /tmp/ext4.img; mkfs.ext4 -q -F /tmp/ext4.img
 mkdir -p /tmp/ext4m; sudo mount -o loop /tmp/ext4.img /tmp/ext4m; sudo chown $USER /tmp/ext4m
