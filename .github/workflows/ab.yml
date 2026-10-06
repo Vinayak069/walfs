@@ -1,0 +1,24 @@
+name: ab
+
+on:
+  workflow_dispatch:
+
+jobs:
+  ab:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq fio fuse3 e2fsprogs
+      - run: go build -o walfs ./cmd/walfs
+      - name: A/B
+        run: |
+          nproc; free -g | head -2
+          scripts/ab.sh ./walfs out
+          python3 scripts/ab_summary.py out | tee out/summary.md >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ab
+          path: out
