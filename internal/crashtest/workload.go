@@ -159,7 +159,13 @@ func (g *Gen) Next(m *model.Model) Op {
 		{"readdir", 2}, {"stat", 3},
 	}
 	if !g.cfg.NoHandles {
-		table = append(table, w{"open", 3}, w{"hwrite", 4}, w{"hread", 1}, w{"hclose", 3}, w{"hstat", 1})
+		table = append(table, w{"open", 3}, w{"hread", 1}, w{"hclose", 3}, w{"hstat", 1})
+		if !g.cfg.NoOverwrite {
+			// hwrite writes through a handle whose file differs from the
+			// path used to pick the offset, so it cannot honour the
+			// append-only guarantee of NoOverwrite workloads.
+			table = append(table, w{"hwrite", 4})
+		}
 	}
 	sum := 0
 	for _, e := range table {
