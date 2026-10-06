@@ -5,7 +5,7 @@
 set -euo pipefail
 BIN=$(realpath "$1"); ROUNDS=${2:-20}; MODE=${3:-ordered}
 W=$(mktemp -d); IMG=$W/img; MNT=$W/mnt; ACK=$W/ack; mkdir -p "$MNT"
-"$BIN" mkfs -size 512M "$IMG" >/dev/null
+"$BIN" mkfs -size 3G "$IMG" >/dev/null
 
 mount_fs() {
   "$BIN" mount -journal "$MODE" -commit 2s "$MNT" "$IMG" 2>>"$W/daemon.log" &
@@ -27,7 +27,9 @@ try:
         data = rng.randbytes(rng.choice([100, 5000, 70000, 400000]))
         p = os.path.join(d, f"f{i}")
         fd = os.open(p, os.O_CREAT | os.O_WRONLY, 0o644)
-        os.write(fd, data)
+        mv = memoryview(data)
+        while mv:                      # write(2) may be short (e.g. near ENOSPC)
+            mv = mv[os.write(fd, mv):]
         os.fsync(fd)
         os.close(fd)
         dfd = os.open(d, os.O_RDONLY); os.fsync(dfd); os.close(dfd)
