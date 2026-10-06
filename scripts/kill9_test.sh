@@ -120,6 +120,8 @@ for name, (rdir, count, f0sum) in snaps.items():
             continue
         if g is None or sha(g) not in want:
             print(f"SNAPSHOT {name}: f{k} missing or wrong"); bad += 1
+live = sum(1 for n in snaps if os.path.isdir(f"{mnt}/.snapshots/{n}"))
+print(f"verified {len(allowed)} files and {live}/{len(snaps)} acknowledged snapshots")
 sys.exit(1 if bad else 0)
 PY
 
