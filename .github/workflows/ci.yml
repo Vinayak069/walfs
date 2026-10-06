@@ -34,13 +34,21 @@ jobs:
       - name: Mount smoke test
         run: |
           set -ex
-          ./walfs mkfs -size 256M /tmp/s.img
-          mkdir /tmp/m && ./walfs mount /tmp/m /tmp/s.img & sleep 2
-          cd /tmp/m && mkdir -p a/b && echo hello > a/b/f && ln a/b/f a/hard && ln -s b/f a/sym \
-            && mv a/b/f a/b/g && cat a/hard a/sym && dd if=/dev/urandom of=big bs=1M count=64 status=none \
-            && sha256sum big > big.sum && sync && sha256sum -c big.sum && truncate -s 1M big \
-            && stat -c %s big && rm -r a && ls -la && df -h . && cd / && fusermount3 -u /tmp/m && wait
-          ./walfs fsck /tmp/s.img
+          BIN=$PWD/walfs
+          $BIN mkfs -size 256M /tmp/s.img
+          mkdir /tmp/m && $BIN mount /tmp/m /tmp/s.img & sleep 2
+          cd /tmp/m
+          mkdir -p a/b && echo hello > a/b/f && ln a/b/f a/hard && mv a/b/f a/b/g && ln -s b/g a/sym
+          test "$(cat a/hard)" = hello && test "$(cat a/sym)" = hello && test "$(readlink a/sym)" = b/g
+          test "$(stat -c %h a/hard)" = 2
+          dd if=/dev/urandom of=big bs=1M count=64 status=none
+          sha256sum big > big.sum && sync && sha256sum -c big.sum
+          truncate -s 1M big && test "$(stat -c %s big)" = 1048576
+          fallocate -n -o 0 -l 8M big && fallocate -p -n -o 4096 -l 8192 big
+          for i in $(seq 500); do echo $i > a/file$i; done; test "$(ls a | wc -l)" = 503
+          rm -r a && ls -la && df -h .
+          cd / && fusermount3 -u /tmp/m && wait
+          $BIN fsck /tmp/s.img
       - name: kill -9 recovery on a live mount (ordered)
         run: scripts/kill9_test.sh ./walfs 25 ordered
       - name: kill -9 recovery on a live mount (data)
