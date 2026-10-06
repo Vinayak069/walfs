@@ -14,23 +14,23 @@ jobs:
       - name: Run it, write through the mount, scrape metrics
         run: |
           set -ex
-          docker run -d --name w --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined \
+          docker run -d --name walfs-a --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined \
             -p 9100:9100 -v walfs-data:/data walfs:latest
           for i in $(seq 30); do curl -sf localhost:9100/healthz && break; sleep 1; done
-          docker exec w sh -c 'mkdir /mnt/walfs/d && dd if=/dev/urandom of=/mnt/walfs/d/f bs=1M count=32 status=none && sync && ls -l /mnt/walfs/d'
+          docker exec walfs-a sh -c 'mkdir /mnt/walfs/d && dd if=/dev/urandom of=/mnt/walfs/d/f bs=1M count=32 status=none && sync && ls -l /mnt/walfs/d'
           curl -s localhost:9100/metrics | tee metrics.txt | grep -E '^walfs_(commits_total|free_blocks|journal_used_blocks|written_bytes_total|ops_write_total) '
           grep -q '^walfs_written_bytes_total [1-9]' metrics.txt
           grep -q '^walfs_commits_total [1-9]' metrics.txt
-          docker stop w
-          docker logs w 2>&1 | tail -5
+          docker stop walfs-a
+          docker logs walfs-a 2>&1 | tail -5
       - name: Data survives a container restart
         run: |
           set -ex
-          docker rm w
-          docker run -d --name w2 --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined -v walfs-data:/data walfs:latest
+          docker rm walfs-a
+          docker run -d --name walfs-b --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined -v walfs-data:/data walfs:latest
           sleep 4
-          docker exec w2 sh -c 'test "$(stat -c %s /mnt/walfs/d/f)" = 33554432 && echo "file intact after restart"'
-          docker stop w2
+          docker exec walfs-b sh -c 'test "$(stat -c %s /mnt/walfs/d/f)" = 33554432 && echo "file intact after restart"'
+          docker stop walfs-b
 
   kubernetes:
     runs-on: ubuntu-latest
