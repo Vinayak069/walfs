@@ -22,3 +22,5 @@ jobs:
         run: |
           go test ./internal/engine -run 'Concurrent' -race -count=1 -timeout 15m -v
           go test ./internal/crashtest -run 'DifferentialAsync' -race -short -count=1 -timeout 15m
+      - name: Crash consistency with background commits
+        run: go test ./internal/crashtest -run 'CrashConsistencyAsync' -count=1 -timeout 25m

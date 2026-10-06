@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"runtime"
 	"sort"
+	"strings"
 	"sync"
 
 	"github.com/vinayak-singh/walfs/internal/blockdev"
@@ -436,7 +437,7 @@ func (s *session) mountCheck(img *blockdev.MemDevice, j job, lo, hi int, fail fu
 		}
 		if k < 0 {
 			fail(j, "recovered tree matches no operation-boundary state in [%d,%d] (%d files); closest diagnostics: %s",
-				lo, hi, len(snap.Main.Paths), s.explain(snap, lo, hi))
+				lo, hi, len(snap.Main.Paths), s.explain(snap, lo, hi, j.point))
 			return 0, false
 		}
 		*want, *have = d, true
@@ -457,21 +458,38 @@ func (s *session) mountCheck(img *blockdev.MemDevice, j job, lo, hi int, fail fu
 	return k, true
 }
 
-// explain diffs a bad snapshot against the nearest acceptable state.
-func (s *session) explain(snap *Full, lo, hi int) string {
-	best, bestK := "", -1
+// explain describes how a bad recovered tree differs from every acceptable
+// state, and shows the device events around the crash point.
+func (s *session) explain(snap *Full, lo, hi int, p int) string {
+	var b strings.Builder
 	for k := lo; k <= hi && k < len(s.snaps); k++ {
 		d := DiffFull(s.snaps[k], snap)
-		if bestK < 0 || len(d) < len(best) {
-			best, bestK = d, k
+		lines := strings.Split(d, "\n")
+		if len(lines) > 7 {
+			lines = append(lines[:7], "...")
+		}
+		prev, next := "", ""
+		if k >= 1 {
+			prev = s.opText[k-1]
+		}
+		if k < len(s.opText) {
+			next = s.opText[k]
+		}
+		fmt.Fprintf(&b, "\n  vs state %d (after [%s], before [%s]):\n    %s", k, prev, next, strings.Join(lines, "\n    "))
+	}
+	log := s.rec.Log()
+	b.WriteString("\n  device events around the crash point:")
+	for i := max(0, p-6); i < min(len(log), p+3); i++ {
+		e := log[i]
+		mark := " "
+		if i == p {
+			mark = ">" // first event NOT yet issued at the crash
+		}
+		if e.Kind == blockdev.OpFlush {
+			fmt.Fprintf(&b, "\n   %s #%d FLUSH (op %d)", mark, i, e.Tag)
+		} else {
+			fmt.Fprintf(&b, "\n   %s #%d write block %d x%d (op %d)", mark, i, e.Off/format.BlockSize, len(e.Data)/format.BlockSize, e.Tag)
 		}
 	}
-	prev, next := "", ""
-	if bestK >= 1 {
-		prev = s.opText[bestK-1]
-	}
-	if bestK >= 0 && bestK < len(s.opText) {
-		next = s.opText[bestK]
-	}
-	return fmt.Sprintf("nearest is state k=%d (after op [%s], before op [%s]); expected(first) vs actual(second):\n%s", bestK, prev, next, best)
+	return b.String()
 }
