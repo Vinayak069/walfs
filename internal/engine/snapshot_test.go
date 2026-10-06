@@ -74,6 +74,9 @@ func TestSnapshotFreezesState(t *testing.T) {
 			if err := fs.CreateSnapshot("s1"); err != nil {
 				t.Fatal(err)
 			}
+			if err := fs.Checkpoint(); err != nil { // fsck wants an empty journal
+				t.Fatal(err)
+			}
 			snapFSCK(t, dev)
 
 			// Mutate everything the snapshot can see.
