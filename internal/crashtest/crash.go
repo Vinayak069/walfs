@@ -91,8 +91,8 @@ func (r *CrashReport) String() string {
 type session struct {
 	cfg     CrashConfig
 	rec     *blockdev.RecordingDevice
-	digests [][32]byte // digests[k]: expected state after k completed ops
-	snaps   []*Snapshot  // compacted snapshots, for failure diagnostics
+	digests [][32]byte  // digests[k]: expected state after k completed ops
+	snaps   []*Snapshot // compacted snapshots, for failure diagnostics
 	opText  []string
 	// minK[p]: lowest acceptable k for a crash after p events; computed from
 	// operations that completed (including their sync) by then.
