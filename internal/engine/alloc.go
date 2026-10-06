@@ -156,10 +156,12 @@ func (fs *FS) freeBlockRaw(blk uint32, class blockClass) error {
 		}
 		old.inTxn, old.ckpt, old.isData = false, false, false
 	}
-	if img, ok := fs.ckptImg[b]; ok {
-		fs.c.release(img)
-		delete(fs.ckptImg, b)
-	}
+	// Do NOT discard the block's pending checkpoint image here. The block is
+	// only free in the *running* transaction; until that commits, the last
+	// durable state still has it allocated and a checkpoint may advance the
+	// log tail past the transaction that journaled it, so the image must still
+	// reach the home location. finalizeLocked drops it once the freeing
+	// transaction is durable.
 	if fs.opts.Mode != ModeNone && (class == classMeta || fs.opts.Mode == ModeData) {
 		fs.txRevoke[b] = struct{}{}
 	}

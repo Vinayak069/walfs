@@ -416,17 +416,19 @@ func (fs *FS) finalizeLocked(tx *commitTx) {
 		}
 	} else {
 		for _, m := range tx.meta {
-			if _, freedAgain := fs.freedPending[m.blk]; freedAgain {
-				// Freed again by the running transaction: the committed image
-				// must never be written home (the block may be reused). The
-				// journal copy plus the revoke record keep recovery correct.
-				fs.c.release(m.img)
-				continue
-			}
 			if old, ok := fs.ckptImg[m.blk]; ok {
 				fs.c.release(old)
 			}
 			fs.ckptImg[m.blk] = m.img
+		}
+		// Blocks freed by this (now durable) transaction no longer need their
+		// committed images written home: the revoke record keeps recovery from
+		// replaying them, and they may be reused from this point on.
+		for blk := range tx.freed {
+			if img, ok := fs.ckptImg[blk]; ok {
+				fs.c.release(img)
+				delete(fs.ckptImg, blk)
+			}
 		}
 		for _, d := range tx.data {
 			fs.c.release(d.img)

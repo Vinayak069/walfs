@@ -44,12 +44,13 @@ jobs:
           fio --name=layout --directory=/tmp/m --rw=write --bs=1M --size=256M --numjobs=4 --end_fsync=1 >/dev/null
           profile rand_write --rw=randwrite --bs=4k --size=256M --numjobs=4 --filename_format='layout.$jobnum.0'
           profile rand_read  --rw=randread  --bs=4k --size=256M --numjobs=4 --filename_format='layout.$jobnum.0'
+          profile seq_write --rw=write --bs=1M --size=512M --numjobs=1 --end_fsync=1 --filename_format='seq.$jobnum'
           profile fsync_write --rw=randwrite --bs=4k --size=64M --numjobs=1 --fsync=1 --filename_format='layout.0.0'
           curl -s localhost:9100/metrics > out/metrics.txt
           fusermount3 -u /tmp/m; wait
       - name: Summarise profiles
         run: |
-          for n in rand_write rand_read fsync_write; do
+          for n in rand_write rand_read seq_write fsync_write; do
             echo "=== $n: $(cat out/$n.iops)" | tee -a out/summary.txt
             cat out/$n.ps | tee -a out/summary.txt
             echo "--- CPU (top by cumulative)" | tee -a out/summary.txt
