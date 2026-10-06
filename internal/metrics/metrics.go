@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/http/pprof"
 	"sync/atomic"
 	"time"
 
@@ -99,6 +100,11 @@ func Handler(fs *engine.FS, ops *Ops) http.Handler {
 		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
 		Write(w, fs, ops)
 	})
+	// Go profiling endpoints (cpu, heap, goroutine, mutex, block).
+	mux.HandleFunc("/debug/pprof/", pprof.Index)
+	mux.HandleFunc("/debug/pprof/profile", pprof.Profile)
+	mux.HandleFunc("/debug/pprof/symbol", pprof.Symbol)
+	mux.HandleFunc("/debug/pprof/trace", pprof.Trace)
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) {
 		if err := fs.Aborted(); err != nil {
 			http.Error(w, "filesystem aborted: "+err.Error(), http.StatusServiceUnavailable)

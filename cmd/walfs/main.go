@@ -12,6 +12,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"runtime"
 	"strconv"
 	"strings"
 	"syscall"
@@ -138,6 +139,7 @@ func cmdMount(args []string) {
 	debug := fl.Bool("debug", false, "log every FUSE request")
 	ro := fl.Bool("ro", false, "mount read-only")
 	metricsAddr := fl.String("metrics", "", "serve Prometheus /metrics and /healthz on this address (e.g. :9100)")
+	profile := fl.Bool("profile", false, "record mutex and blocking profiles (served under /debug/pprof on the metrics address; adds overhead)")
 	maxWrite := fl.Int("max-write", 1<<20, "maximum size of a single FUSE write")
 	_ = fl.Parse(args)
 	if fl.NArg() != 2 {
@@ -166,6 +168,10 @@ func cmdMount(args []string) {
 	opts := []string{"default_permissions"}
 	if *ro {
 		opts = append(opts, "ro")
+	}
+	if *profile {
+		runtime.SetMutexProfileFraction(5)
+		runtime.SetBlockProfileRate(10000) // one sample per 10 µs blocked
 	}
 	ops := &metrics.Ops{}
 	if *metricsAddr != "" {

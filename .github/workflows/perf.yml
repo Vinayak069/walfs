@@ -1,0 +1,69 @@
+name: perf
+
+on:
+  workflow_dispatch:
+    inputs:
+      extra_mount_args:
+        description: extra arguments for `walfs mount`
+        default: ""
+
+jobs:
+  profile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq fio fuse3
+      - run: go build -o walfs ./cmd/walfs
+      - name: Profile the daemon under fio
+        run: |
+          set -x
+          mkdir -p out
+          nproc; free -g | head -2
+          ./walfs mkfs -size 4G /tmp/p.img
+          mkdir /tmp/m
+          ./walfs mount -metrics :9100 -profile ${{ inputs.extra_mount_args }} /tmp/m /tmp/p.img 2>out/daemon.log &
+          DPID=$!
+          sleep 2
+          profile() {   # name, fio args...
+            name=$1; shift
+            fio --name=$name --directory=/tmp/m --output-format=json --output=out/$name.json --group_reporting \
+                --ioengine=psync --randrepeat=0 --time_based --runtime=22 --ramp_time=2 "$@" >/dev/null &
+            FPID=$!
+            sleep 6
+            ps -o %cpu,rss,nlwp -p $DPID | tee out/$name.ps
+            curl -s "localhost:9100/debug/pprof/profile?seconds=12" -o out/$name.cpu.prof
+            curl -s "localhost:9100/debug/pprof/mutex" -o out/$name.mutex.prof
+            curl -s "localhost:9100/debug/pprof/block" -o out/$name.block.prof
+            wait $FPID
+            python3 scripts/fio_iops.py out/$name.json | tee out/$name.iops
+          }
+          # layout files once so that read jobs do not time file creation
+          fio --name=layout --directory=/tmp/m --rw=write --bs=1M --size=256M --numjobs=4 --end_fsync=1 >/dev/null
+          profile rand_write --rw=randwrite --bs=4k --size=256M --numjobs=4 --filename_format='layout.$jobnum.0'
+          profile rand_read  --rw=randread  --bs=4k --size=256M --numjobs=4 --filename_format='layout.$jobnum.0'
+          profile fsync_write --rw=randwrite --bs=4k --size=64M --numjobs=1 --fsync=1 --filename_format='layout.0.0'
+          curl -s localhost:9100/metrics > out/metrics.txt
+          fusermount3 -u /tmp/m; wait
+      - name: Summarise profiles
+        run: |
+          for n in rand_write rand_read fsync_write; do
+            echo "=== $n: $(cat out/$n.iops)" | tee -a out/summary.txt
+            cat out/$n.ps | tee -a out/summary.txt
+            echo "--- CPU (top by cumulative)" | tee -a out/summary.txt
+            go tool pprof -top -cum -nodecount=30 walfs out/$n.cpu.prof 2>/dev/null | head -45 | tee -a out/summary.txt
+            echo "--- CPU (top flat)" | tee -a out/summary.txt
+            go tool pprof -top -nodecount=20 walfs out/$n.cpu.prof 2>/dev/null | head -32 | tee -a out/summary.txt
+            echo "--- mutex contention" | tee -a out/summary.txt
+            go tool pprof -top -nodecount=10 walfs out/$n.mutex.prof 2>/dev/null | head -20 | tee -a out/summary.txt
+            echo "--- blocking" | tee -a out/summary.txt
+            go tool pprof -top -nodecount=12 walfs out/$n.block.prof 2>/dev/null | head -22 | tee -a out/summary.txt
+          done
+          grep -E "walfs_(commits|device_flushes|journal_blocks_written|data_blocks|ops_write|ops_read)" out/metrics.txt | tee -a out/summary.txt
+          cat out/summary.txt >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: profiles
+          path: out
