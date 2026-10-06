@@ -21,3 +21,27 @@ jobs:
         run: go test ./... -count=1 -timeout 30m
       - name: Race detector (short)
         run: go test ./... -race -short -count=1 -timeout 30m
+
+  fuse:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq fuse3
+      - run: go build -o walfs ./cmd/walfs
+      - name: Mount smoke test
+        run: |
+          set -ex
+          ./walfs mkfs -size 256M /tmp/s.img
+          mkdir /tmp/m && ./walfs mount /tmp/m /tmp/s.img & sleep 2
+          cd /tmp/m && mkdir -p a/b && echo hello > a/b/f && ln a/b/f a/hard && ln -s b/f a/sym \
+            && mv a/b/f a/b/g && cat a/hard a/sym && dd if=/dev/urandom of=big bs=1M count=64 status=none \
+            && sha256sum big > big.sum && sync && sha256sum -c big.sum && truncate -s 1M big \
+            && stat -c %s big && rm -r a && ls -la && df -h . && cd / && fusermount3 -u /tmp/m && wait
+          ./walfs fsck /tmp/s.img
+      - name: kill -9 recovery on a live mount (ordered)
+        run: scripts/kill9_test.sh ./walfs 25 ordered
+      - name: kill -9 recovery on a live mount (data)
+        run: scripts/kill9_test.sh ./walfs 15 data
