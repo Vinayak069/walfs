@@ -156,32 +156,42 @@ func (c *cache) forget(b *buf) {
 	b.data = nil
 }
 
+// evictScanBudget bounds how many entries one eviction attempt examines.
+const evictScanBudget = 256
+
 // evictLocked trims the cache back under its capacity using a second-chance
-// sweep over unpinned buffers. Go's randomised map iteration makes the sweep
-// start at a random point, which spreads eviction without an LRU list.
+// sweep. Go's randomised map iteration makes the sweep start at a random
+// point, which spreads eviction without an LRU list. The work per call is
+// bounded: when most buffers are pinned (journaled blocks awaiting their
+// checkpoint, data in flight), a full scan would find no victim and, repeated
+// for every allocation, make the cache quadratic. Instead the cache is allowed
+// to exceed its capacity temporarily; pinned buffers are released at the next
+// commit or checkpoint, and later calls pick victims up again.
 func (c *cache) evictLocked() {
 	if len(c.m) < c.cap {
 		return
 	}
 	target := c.cap - c.cap/8
-	for pass := 0; pass < 2 && len(c.m) > target; pass++ {
-		for blk, b := range c.m {
-			if b.pinned() {
-				continue
-			}
-			select {
-			case <-b.ready:
-			default:
-				continue // still loading
-			}
-			if b.used && pass == 0 {
-				b.used = false
-				continue
-			}
-			delete(c.m, blk)
-			if len(c.m) <= target {
-				return
-			}
+	scanned := 0
+	for blk, b := range c.m {
+		if scanned++; scanned > evictScanBudget {
+			return
+		}
+		if b.pinned() {
+			continue
+		}
+		select {
+		case <-b.ready:
+		default:
+			continue // still loading
+		}
+		if b.used {
+			b.used = false // second chance
+			continue
+		}
+		delete(c.m, blk)
+		if len(c.m) <= target {
+			return
 		}
 	}
 }
