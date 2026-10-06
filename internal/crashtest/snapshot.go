@@ -116,9 +116,15 @@ func TakeSnapshot(fs VFS, withTimes bool) (*Snapshot, error) {
 	return s, nil
 }
 
-// Digest returns a hash of the canonical form.
-func (s *Snapshot) Digest() [32]byte {
-	if s.hashed {
+// Digest returns a hash of the canonical form, including file contents.
+func (s *Snapshot) Digest() [32]byte { return s.digestOpt(true) }
+
+// DigestNoData hashes everything except regular-file contents (sizes and
+// all metadata are still covered).
+func (s *Snapshot) DigestNoData() [32]byte { return s.digestOpt(false) }
+
+func (s *Snapshot) digestOpt(withData bool) [32]byte {
+	if withData && s.hashed {
 		return s.digest
 	}
 	h := sha256.New()
@@ -140,11 +146,16 @@ func (s *Snapshot) Digest() [32]byte {
 		h.Write([]byte{0})
 		h.Write([]byte(n.Group))
 		h.Write([]byte{0})
-		h.Write(n.Data)
+		if withData {
+			h.Write(n.Data)
+		}
 	}
-	copy(s.digest[:], h.Sum(nil))
-	s.hashed = true
-	return s.digest
+	var out [32]byte
+	copy(out[:], h.Sum(nil))
+	if withData {
+		s.digest, s.hashed = out, true
+	}
+	return out
 }
 
 // Diff describes up to a handful of differences between two snapshots, or ""

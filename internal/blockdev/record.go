@@ -29,6 +29,11 @@ type RecordingDevice struct {
 	base []byte // image at the time recording started
 	log  []LogEntry
 	tag  int
+
+	// DropFlushes makes Flush a silent no-op that is not logged: the device
+	// then behaves as if it ignored cache-flush commands. Used as a negative
+	// control to prove that the crash harness detects missing barriers.
+	DropFlushes bool
 }
 
 // NewRecording starts recording on top of mem. The current contents of mem are
@@ -55,6 +60,9 @@ func (d *RecordingDevice) WriteAt(p []byte, off int64) (int, error) {
 }
 
 func (d *RecordingDevice) Flush() error {
+	if d.DropFlushes {
+		return nil
+	}
 	d.mu.Lock()
 	d.log = append(d.log, LogEntry{Kind: OpFlush, Tag: d.tag})
 	d.mu.Unlock()
