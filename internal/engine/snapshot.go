@@ -15,6 +15,7 @@ import (
 // recovery at mount, and the read-only views.
 
 type snapState struct {
+	uid       uint32 // unique among snapshots seen by this mount (slots get reused)
 	slot      int
 	name      string
 	created   int64
@@ -47,6 +48,7 @@ func (fs *FS) cowRecords() int {
 type SnapInfo struct {
 	Name      string
 	Slot      int
+	UID       uint32
 	CreatedNS int64
 }
 
@@ -61,7 +63,7 @@ func (fs *FS) listSnapshotsLocked() []SnapInfo {
 	var out []SnapInfo
 	for i := 0; i < format.MaxSnapshots; i++ {
 		if s := fs.snaps[i]; s != nil && s.state == format.SnapActive {
-			out = append(out, SnapInfo{Name: s.name, Slot: i, CreatedNS: s.created})
+			out = append(out, SnapInfo{Name: s.name, Slot: i, UID: s.uid, CreatedNS: s.created})
 		}
 	}
 	return out
@@ -245,6 +247,11 @@ func validSnapName(name string) error {
 	return nil
 }
 
+func (fs *FS) nextSnapUID() uint32 {
+	fs.snapSeq++
+	return fs.snapSeq
+}
+
 func (fs *FS) snapByName(name string) *snapState {
 	for _, s := range fs.snaps {
 		if s != nil && s.name == name {
@@ -324,7 +331,7 @@ func (fs *FS) CreateSnapshot(name string) error {
 	if err != nil {
 		return errnoOrNil(err)
 	}
-	st := &snapState{slot: slot, name: name, created: fs.now(), state: format.SnapActive, capList: listBlk}
+	st := &snapState{uid: fs.nextSnapUID(), slot: slot, name: name, created: fs.now(), state: format.SnapActive, capList: listBlk}
 	for i := 0; i < nbb; i++ {
 		b, err := alloc()
 		if err != nil {
@@ -524,7 +531,7 @@ func (fs *FS) loadSnapshots() error {
 		if e.State == format.SnapFree {
 			continue
 		}
-		s := &snapState{slot: i, name: e.Name, created: e.CreatedNS, state: e.State, capList: e.CapList}
+		s := &snapState{uid: fs.nextSnapUID(), slot: i, name: e.Name, created: e.CreatedNS, state: e.State, capList: e.CapList}
 		lb, err := fs.c.get(uint64(e.CapList))
 		if err != nil {
 			return err

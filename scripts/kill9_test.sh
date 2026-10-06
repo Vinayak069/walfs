@@ -21,58 +21,105 @@ rng = random.Random(rnd)
 d = os.path.join(mnt, f"round{rnd}")
 os.makedirs(d, exist_ok=True)
 a = open(ack, "a")
-i = 0
+def note(line):                      # durable bookkeeping on the host filesystem
+    a.write(line + "\n"); a.flush(); os.fsync(a.fileno())
+def write_all(fd, data):
+    mv = memoryview(data)
+    while mv:                        # write(2) may be short (e.g. near ENOSPC)
+        mv = mv[os.write(fd, mv):]
+sha = lambda b: hashlib.sha256(b).hexdigest()
+i = snapn = 0
 try:
+    snapdir = os.path.join(mnt, ".snapshots")
+    for name in os.listdir(snapdir):             # clear snapshots left by earlier rounds
+        note(f"SD {name}")
+        os.rmdir(os.path.join(snapdir, name))
+        note(f"SNAPDEL {name}")
     while True:
         data = rng.randbytes(rng.choice([100, 5000, 70000, 400000]))
         p = os.path.join(d, f"f{i}")
         fd = os.open(p, os.O_CREAT | os.O_WRONLY, 0o644)
-        mv = memoryview(data)
-        while mv:                      # write(2) may be short (e.g. near ENOSPC)
-            mv = mv[os.write(fd, mv):]
+        write_all(fd, data)
         os.fsync(fd)
         os.close(fd)
         dfd = os.open(d, os.O_RDONLY); os.fsync(dfd); os.close(dfd)
-        a.write(f"{p[len(mnt):]} {hashlib.sha256(data).hexdigest()}\n"); a.flush(); os.fsync(a.fileno())
+        note(f"F {p[len(mnt):]} {sha(data)}")      # acknowledged: must survive
         i += 1
-        if i % 7 == 0:       # also churn the namespace
+        if i % 7 == 0:               # also churn the namespace
             os.rename(p, p + ".r"); os.rename(p + ".r", p)
+        if i % 20 == 0:
+            # Take a snapshot, then overwrite f0 in place so that the
+            # copy-on-write path runs while the snapshot exists.
+            name = f"r{rnd}_s{snapn}"; snapn += 1
+            f0 = os.path.join(d, "f0")
+            old = sha(open(f0, "rb").read())
+            os.mkdir(os.path.join(mnt, ".snapshots", name))
+            nd = rng.randbytes(30000)
+            note(f"M {f0[len(mnt):]} {sha(nd)}")  # may or may not be applied if we die now
+            fd0 = os.open(f0, os.O_WRONLY)
+            write_all(fd0, nd); os.ftruncate(fd0, 30000); os.fsync(fd0); os.close(fd0)
+            # That fsync also committed the snapshot creation (one total order).
+            note(f"F {f0[len(mnt):]} {sha(nd)}")
+            note(f"SNAP {name} round{rnd} {i} {old}")
+            if snapn % 2 == 0:       # keep the number of snapshots bounded
+                victim = f"r{rnd}_s{snapn-2}"
+                note(f"SD {victim}")             # may or may not be deleted if we die now
+                os.rmdir(os.path.join(mnt, ".snapshots", victim))
+                dfd = os.open(d, os.O_RDONLY); os.fsync(dfd); os.close(dfd)
+                note(f"SNAPDEL {victim}")
 except OSError:
-    pass                       # the daemon was killed under us
+    pass                             # the daemon was killed under us
 PY
 
 cat > "$W/verify.py" <<'PY'
-import os, sys, hashlib, random
+import os, sys, hashlib
 mnt, ack = sys.argv[1], sys.argv[2]
-bad = 0
-cache = {}
-def expected(rnd, idx):
-    # Regenerate exactly what writer.py wrote for file idx of round rnd.
-    if rnd not in cache:
-        cache[rnd] = (random.Random(rnd), [])
-    rng, seq = cache[rnd]
-    while len(seq) <= idx:
-        seq.append(rng.randbytes(rng.choice([100, 5000, 70000, 400000])))
-    return seq[idx]
+sha = lambda b: hashlib.sha256(b).hexdigest()
+allowed = {}          # path -> hashes the file may legitimately have
+snaps, maybe_deleted = {}, set()
 for line in open(ack):
-    path, want = line.split()
+    t = line.split()
+    if t[0] == "F":                       # acknowledged: exactly this from now on
+        allowed[t[1]] = {t[2]}
+    elif t[0] == "M":                     # in flight: old or new
+        allowed.setdefault(t[1], set()).add(t[2])
+    elif t[0] == "SNAP":
+        snaps[t[1]] = (t[2], int(t[3]), t[4])
+    elif t[0] == "SD":
+        maybe_deleted.add(t[1])
+    elif t[0] == "SNAPDEL":
+        snaps.pop(t[1], None)
+        maybe_deleted.discard(t[1])
+bad = 0
+def read(path):
     try:
-        got = open(mnt + path, "rb").read()
-    except OSError as e:
-        print(f"LOST {path}: {e}"); bad += 1; continue
-    if hashlib.sha256(got).hexdigest() == want:
+        return open(path, "rb").read()
+    except OSError:
+        return None
+for path, hashes in allowed.items():
+    got = read(mnt + path)
+    if got is None:
+        print(f"LOST {path}"); bad += 1
+    elif sha(got) not in hashes:
+        print(f"CORRUPT {path}: {len(got)} bytes, hash matches none of {len(hashes)} acceptable versions"); bad += 1
+# Every acknowledged snapshot must exist (unless a deletion was in flight) and
+# show the tree as it was: all files created before it, f0 in its old version.
+for name, (rdir, count, f0sum) in snaps.items():
+    base = f"{mnt}/.snapshots/{name}/{rdir}"
+    if not os.path.isdir(base):
+        if name not in maybe_deleted:
+            print(f"SNAPSHOT {name} lost"); bad += 1
         continue
-    bad += 1
-    rnd = int(path.split("/")[1][5:]); idx = int(path.rsplit("/f", 1)[1])
-    exp = expected(rnd, idx)
-    first = next((i for i in range(min(len(got), len(exp))) if got[i] != exp[i]), None)
-    diff = [i for i in range(min(len(got), len(exp))) if got[i] != exp[i]]
-    zero = sum(1 for i in diff if got[i] == 0)
-    print(f"CORRUPT {path}: want {len(exp)} bytes, got {len(got)}; first diff at {first}; "
-          f"{len(diff)} differing bytes ({zero} are zero in the file); "
-          f"diff range {diff[0] if diff else None}..{diff[-1] if diff else None}")
-    print(f"  expected bytes at first diff: {exp[first:first+8].hex() if first is not None else '-'}, "
-          f"found: {got[first:first+8].hex() if first is not None else '-'}")
+    g = read(base + "/f0")
+    if g is None or sha(g) != f0sum:
+        print(f"SNAPSHOT {name}: f0 is not the version from snapshot time"); bad += 1
+    for k in range(1, count):
+        want = allowed.get(f"/{rdir}/f{k}")
+        g = read(f"{base}/f{k}")
+        if want is None:
+            continue
+        if g is None or sha(g) not in want:
+            print(f"SNAPSHOT {name}: f{k} missing or wrong"); bad += 1
 sys.exit(1 if bad else 0)
 PY
 

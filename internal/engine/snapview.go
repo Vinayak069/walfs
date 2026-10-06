@@ -81,11 +81,16 @@ func (fs *FS) SnapshotView(name string) (*FS, error) {
 	return fs.viewLocked(s.slot), nil
 }
 
-// SnapshotViewBySlot is SnapshotView addressed by slot number.
-func (fs *FS) SnapshotViewBySlot(slot int) (*FS, error) {
+// SnapshotViewByID is SnapshotView addressed by slot and unique id; it fails
+// with ESTALE if the slot has since been reused by a different snapshot.
+func (fs *FS) SnapshotViewByID(slot int, uid uint32) (*FS, error) {
 	fs.mu.Lock()
 	defer fs.mu.Unlock()
-	if slot < 0 || slot >= format.MaxSnapshots || fs.snaps[slot] == nil || fs.snaps[slot].state != format.SnapActive {
+	if slot < 0 || slot >= format.MaxSnapshots {
+		return nil, syscall.ESTALE
+	}
+	s := fs.snaps[slot]
+	if s == nil || s.state != format.SnapActive || s.uid&0xFFFFF != uid&0xFFFFF {
 		return nil, syscall.ESTALE
 	}
 	return fs.viewLocked(slot), nil

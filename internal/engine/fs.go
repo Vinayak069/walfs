@@ -209,6 +209,7 @@ type FS struct {
 	snapSys     map[uint32]struct{} // blocks that belong to the snapshot machinery itself
 	snapViews   [format.MaxSnapshots]*FS
 	snapReserve int
+	snapSeq     uint32
 	// set only on a snapshot view:
 	snapParent *FS
 	snapSlot   int

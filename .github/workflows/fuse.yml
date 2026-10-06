@@ -34,7 +34,33 @@ jobs:
           cat /tmp/daemon.log | tail -5
           test "$(ls a | wc -l)" = 503
           rm -r a && ls -la && df -h .
+          # --- snapshots through the hidden .snapshots directory
+          mkdir data && echo v1 > data/f && echo keep > data/gone && dd if=/dev/urandom of=data/blob bs=1M count=8 status=none
+          sha256sum data/blob > blob.sum
+          mkdir .snapshots/s1
+          echo v2 > data/f && rm data/gone && dd if=/dev/urandom of=data/blob bs=1M count=8 conv=notrunc status=none && echo new > data/new
+          test "$(cat data/f)" = v2
+          test "$(cat .snapshots/s1/data/f)" = v1
+          test "$(cat .snapshots/s1/data/gone)" = keep
+          test ! -e .snapshots/s1/data/new
+          sha256sum -c --quiet <(sed 's# data/blob# .snapshots/s1/data/blob#' blob.sum)
+          ls .snapshots | grep -qx s1
+          ! touch .snapshots/s1/x 2>/dev/null
+          ! rm .snapshots/s1/data/f 2>/dev/null
+          ! echo x >> .snapshots/s1/data/f 2>/dev/null
+          stat -c '%a' .snapshots/s1/data/f
+          find .snapshots/s1 | head
+          mkdir .snapshots/s2
+          rmdir .snapshots/s1
+          ! test -e .snapshots/s1
+          ls .snapshots
+          test "$(ls .snapshots)" = s2
+          rmdir .snapshots/s2
           cd / && fusermount3 -u /tmp/m && wait
+          $BIN fsck /tmp/s.img
+          $BIN snapshot list /tmp/s.img
+          $BIN snapshot create /tmp/s.img offline1 && $BIN snapshot list /tmp/s.img | grep -q offline1
+          $BIN snapshot delete /tmp/s.img offline1
           $BIN fsck /tmp/s.img
       - name: kill -9 recovery on a live mount (ordered)
         run: scripts/kill9_test.sh ./walfs 25 ordered

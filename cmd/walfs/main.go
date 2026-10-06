@@ -33,6 +33,12 @@ func usage() {
   walfs mount [-journal ordered|data|none] [-commit 5s] [-cache-mb 128] MOUNTPOINT IMAGE
   walfs fsck  [-replay] IMAGE
   walfs info  IMAGE
+  walfs snapshot create|delete|list IMAGE [NAME]        (image must not be mounted)
+
+On a mounted filesystem use the hidden directory instead:
+  mkdir MOUNT/.snapshots/NAME      create a snapshot
+  ls MOUNT/.snapshots/NAME         browse it (read-only)
+  rmdir MOUNT/.snapshots/NAME      delete it
 `)
 	os.Exit(2)
 }
@@ -55,6 +61,8 @@ func main() {
 		cmdFsck(os.Args[2:])
 	case "info":
 		cmdInfo(os.Args[2:])
+	case "snapshot":
+		cmdSnapshot(os.Args[2:])
 	default:
 		usage()
 	}
@@ -168,7 +176,7 @@ func cmdMount(args []string) {
 		}()
 		fmt.Fprintf(os.Stderr, "walfs: metrics on http://%s/metrics\n", *metricsAddr)
 	}
-	srv, err := fuse.NewServer(fusefs.New(e, fusefs.Options{AttrTimeout: *attr, EntryTimeout: *attr}).WithMetrics(ops), mp, &fuse.MountOptions{
+	srv, err := fuse.NewServer(fusefs.NewRouter(fusefs.New(e, fusefs.Options{AttrTimeout: *attr, EntryTimeout: *attr}).WithMetrics(ops)), mp, &fuse.MountOptions{
 		FsName: "walfs", Name: "walfs", AllowOther: *allow, Debug: *debug,
 		MaxWrite: *maxWrite, Options: opts, MaxBackground: 64,
 	})
@@ -245,5 +253,46 @@ func cmdInfo(args []string) {
 	if j, err := format.ReadJournal(dev, sb); err == nil {
 		txns, _, _ := j.Scan()
 		fmt.Printf("  journal state   tail seq %d, %d committed transaction(s) awaiting replay\n", j.Super.TailSeq, len(txns))
+	}
+}
+
+func cmdSnapshot(args []string) {
+	if len(args) < 2 {
+		usage()
+	}
+	action, img := args[0], args[1]
+	dev, err := blockdev.OpenFile(img, 0, false)
+	if err != nil {
+		die("%v", err)
+	}
+	defer dev.Close()
+	e, _, err := engine.Open(dev, engine.Options{Mode: engine.ModeOrdered})
+	if err != nil {
+		die("opening filesystem: %v", err)
+	}
+	switch action {
+	case "list":
+		for _, s := range e.ListSnapshots() {
+			fmt.Printf("%-24s slot %-2d created %s\n", s.Name, s.Slot, time.Unix(0, s.CreatedNS).Format(time.RFC3339))
+		}
+	case "create", "delete":
+		if len(args) != 3 {
+			usage()
+		}
+		if action == "create" {
+			err = e.CreateSnapshot(args[2])
+		} else {
+			err = e.DeleteSnapshot(args[2])
+		}
+		if err != nil {
+			_ = e.Close()
+			die("snapshot %s %q: %v", action, args[2], err)
+		}
+		fmt.Printf("snapshot %q %sd\n", args[2], action)
+	default:
+		usage()
+	}
+	if err := e.Close(); err != nil {
+		die("closing filesystem: %v", err)
 	}
 }
