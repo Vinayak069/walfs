@@ -47,6 +47,11 @@ type GenConfig struct {
 	SyncPercent int    // chance (per mille) of a sync op
 	Sparse      bool   // allow rare writes far past EOF (double-indirect blocks)
 	NoSnapshots bool   // never create, delete or read snapshots
+	// NoCompound forbids operations that the runner executes as several engine
+	// calls (writing to a missing path = create + write). Crash tests need it:
+	// a commit may legitimately land between the two calls, which is a valid
+	// on-disk state but not an operation boundary of the model.
+	NoCompound bool
 }
 
 // Gen produces operations.
@@ -214,6 +219,11 @@ func (g *Gen) Next(m *model.Model) Op {
 		g.fillWrite(&op, files, sizes)
 		if op.Kind == "hwrite" {
 			op.Slot = g.rng.Intn(4)
+		} else if g.cfg.NoCompound {
+			if _, exists := sizes[op.A]; !exists {
+				// Writing to a missing path would be create + write: create it.
+				op.Kind, op.Mode = "create", 0o644
+			}
 		}
 	case "truncate":
 		op.A = filePath()

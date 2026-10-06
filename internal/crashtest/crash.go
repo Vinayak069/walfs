@@ -45,7 +45,7 @@ type CrashConfig struct {
 // DefaultCrash returns a configuration tuned for CI speed.
 func DefaultCrash(seed int64, mode engine.JournalMode) CrashConfig {
 	cfg := CrashConfig{
-		Gen:             GenConfig{Seed: seed, MaxWrite: 20 << 10, MaxFile: 256 << 10, MaxData: 512 << 10, Names: 6, Sparse: true, SyncPercent: 150, NoSnapshots: mode == engine.ModeNone},
+		Gen:             GenConfig{Seed: seed, MaxWrite: 20 << 10, MaxFile: 256 << 10, MaxData: 512 << 10, Names: 6, Sparse: true, SyncPercent: 150, NoSnapshots: mode == engine.ModeNone, NoCompound: true},
 		Ops:             250,
 		Mode:            mode,
 		ImageBlocks:     2048,
