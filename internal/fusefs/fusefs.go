@@ -11,6 +11,7 @@ import (
 
 	"github.com/vinayak-singh/walfs/internal/engine"
 	"github.com/vinayak-singh/walfs/internal/format"
+	"github.com/vinayak-singh/walfs/internal/metrics"
 )
 
 // Options tunes the adapter.
@@ -24,12 +25,16 @@ type FS struct {
 	fuse.RawFileSystem
 	e    *engine.FS
 	opts Options
+	ops  *metrics.Ops // optional
 }
 
 // New wraps e.
 func New(e *engine.FS, o Options) *FS {
 	return &FS{RawFileSystem: fuse.NewDefaultRawFileSystem(), e: e, opts: o}
 }
+
+// WithMetrics attaches request counters.
+func (f *FS) WithMetrics(m *metrics.Ops) *FS { f.ops = m; return f }
 
 func (f *FS) String() string { return "walfs" }
 
@@ -40,6 +45,14 @@ func st(err error) fuse.Status {
 		return fuse.OK
 	}
 	return fuse.ToStatus(err)
+}
+
+// fail records a failed request.
+func (f *FS) fail(err error) fuse.Status {
+	if err != nil && f.ops != nil {
+		f.ops.Errors.Add(1)
+	}
+	return st(err)
 }
 
 func split(ns int64) (sec uint64, nsec uint32) {
@@ -72,8 +85,14 @@ func (f *FS) fillEntry(o *fuse.EntryOut, a engine.Attr) {
 }
 
 func (f *FS) Lookup(_ <-chan struct{}, h *fuse.InHeader, name string, out *fuse.EntryOut) fuse.Status {
+	if f.ops != nil {
+		f.ops.Lookups.Add(1)
+	}
 	a, err := f.e.Lookup(h.NodeId, name)
 	if err != nil {
+		if err != syscall.ENOENT {
+			return f.fail(err)
+		}
 		return st(err)
 	}
 	f.fillEntry(out, a)
@@ -130,9 +149,12 @@ func (f *FS) SetAttr(_ <-chan struct{}, in *fuse.SetAttrIn, out *fuse.AttrOut) f
 }
 
 func (f *FS) Mknod(_ <-chan struct{}, in *fuse.MknodIn, name string, out *fuse.EntryOut) fuse.Status {
+	if f.ops != nil {
+		f.ops.Creates.Add(1)
+	}
 	a, err := f.e.Mknod(ctxOf(&in.InHeader), in.NodeId, name, in.Mode, uint64(in.Rdev))
 	if err != nil {
-		return st(err)
+		return f.fail(err)
 	}
 	f.fillEntry(out, a)
 	return fuse.OK
@@ -171,24 +193,36 @@ func (f *FS) Link(_ <-chan struct{}, in *fuse.LinkIn, name string, out *fuse.Ent
 }
 
 func (f *FS) Unlink(_ <-chan struct{}, h *fuse.InHeader, name string) fuse.Status {
-	return st(f.e.Unlink(h.NodeId, name))
+	if f.ops != nil {
+		f.ops.Unlinks.Add(1)
+	}
+	return f.fail(f.e.Unlink(h.NodeId, name))
 }
 
 func (f *FS) Rmdir(_ <-chan struct{}, h *fuse.InHeader, name string) fuse.Status {
-	return st(f.e.Rmdir(h.NodeId, name))
+	if f.ops != nil {
+		f.ops.Unlinks.Add(1)
+	}
+	return f.fail(f.e.Rmdir(h.NodeId, name))
 }
 
 func (f *FS) Rename(_ <-chan struct{}, in *fuse.RenameIn, oldName, newName string) fuse.Status {
-	return st(f.e.Rename(in.NodeId, oldName, in.Newdir, newName, in.Flags))
+	if f.ops != nil {
+		f.ops.Renames.Add(1)
+	}
+	return f.fail(f.e.Rename(in.NodeId, oldName, in.Newdir, newName, in.Flags))
 }
 
 // Access is only reached when the kernel is not enforcing permissions itself.
 func (f *FS) Access(_ <-chan struct{}, in *fuse.AccessIn) fuse.Status { return fuse.OK }
 
 func (f *FS) Create(_ <-chan struct{}, in *fuse.CreateIn, name string, out *fuse.CreateOut) fuse.Status {
+	if f.ops != nil {
+		f.ops.Creates.Add(1)
+	}
 	a, err := f.e.Mknod(ctxOf(&in.InHeader), in.NodeId, name, format.SIFREG|(in.Mode&0o7777), 0)
 	if err != nil {
-		return st(err)
+		return f.fail(err)
 	}
 	f.fillEntry(&out.EntryOut, a)
 	return fuse.OK
@@ -204,17 +238,27 @@ func (f *FS) Open(_ <-chan struct{}, in *fuse.OpenIn, out *fuse.OpenOut) fuse.St
 }
 
 func (f *FS) Read(_ <-chan struct{}, in *fuse.ReadIn, buf []byte) (fuse.ReadResult, fuse.Status) {
+	t0 := time.Now()
 	n, err := f.e.Read(in.NodeId, in.Offset, buf[:min(len(buf), int(in.Size))])
+	if f.ops != nil {
+		f.ops.Observe(&f.ops.Reads, &f.ops.ReadNanos, t0)
+		f.ops.ReadBytes.Add(uint64(max(n, 0)))
+	}
 	if err != nil {
-		return nil, st(err)
+		return nil, f.fail(err)
 	}
 	return fuse.ReadResultData(buf[:n]), fuse.OK
 }
 
 func (f *FS) Write(_ <-chan struct{}, in *fuse.WriteIn, data []byte) (uint32, fuse.Status) {
+	t0 := time.Now()
 	n, err := f.e.Write(ctxOf(&in.InHeader), in.NodeId, in.Offset, data)
+	if f.ops != nil {
+		f.ops.Observe(&f.ops.Writes, &f.ops.WriteNanos, t0)
+		f.ops.WrittenBytes.Add(uint64(max(n, 0)))
+	}
 	if err != nil {
-		return uint32(n), st(err)
+		return uint32(n), f.fail(err)
 	}
 	return uint32(n), fuse.OK
 }
@@ -244,9 +288,16 @@ func (f *FS) Release(_ <-chan struct{}, in *fuse.ReleaseIn) {}
 
 // Fsync commits the running journal transaction, which makes every operation
 // issued so far durable (the journal is a single total order).
-func (f *FS) Fsync(_ <-chan struct{}, in *fuse.FsyncIn) fuse.Status { return st(f.e.Sync()) }
+func (f *FS) Fsync(_ <-chan struct{}, in *fuse.FsyncIn) fuse.Status {
+	t0 := time.Now()
+	err := f.e.Sync()
+	if f.ops != nil {
+		f.ops.Observe(&f.ops.Fsyncs, &f.ops.FsyncNanos, t0)
+	}
+	return f.fail(err)
+}
 
-func (f *FS) FsyncDir(_ <-chan struct{}, in *fuse.FsyncIn) fuse.Status { return st(f.e.Sync()) }
+func (f *FS) FsyncDir(c <-chan struct{}, in *fuse.FsyncIn) fuse.Status { return f.Fsync(c, in) }
 
 func (f *FS) OpenDir(_ <-chan struct{}, in *fuse.OpenIn, out *fuse.OpenOut) fuse.Status {
 	return fuse.OK

@@ -118,6 +118,7 @@ func (fs *FS) commit() error {
 	if len(fs.txMeta) == 0 && len(fs.txData) == 0 && len(fs.txRevoke) == 0 {
 		return nil
 	}
+	t0 := time.Now()
 	var err error
 	if fs.opts.Mode == ModeNone {
 		err = fs.commitNoJournal()
@@ -129,6 +130,7 @@ func (fs *FS) commit() error {
 		return err
 	}
 	fs.lastFlush = time.Now()
+	fs.stats.observeCommit(time.Since(t0))
 	fs.stats.Commits++
 	return nil
 }

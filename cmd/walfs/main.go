@@ -9,6 +9,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/http"
 	"os"
 	"os/signal"
 	"strconv"
@@ -23,6 +24,7 @@ import (
 	"github.com/vinayak-singh/walfs/internal/format"
 	"github.com/vinayak-singh/walfs/internal/fsck"
 	"github.com/vinayak-singh/walfs/internal/fusefs"
+	"github.com/vinayak-singh/walfs/internal/metrics"
 )
 
 func usage() {
@@ -127,6 +129,7 @@ func cmdMount(args []string) {
 	allow := fl.Bool("allow-other", false, "allow other users (needs user_allow_other in /etc/fuse.conf)")
 	debug := fl.Bool("debug", false, "log every FUSE request")
 	ro := fl.Bool("ro", false, "mount read-only")
+	metricsAddr := fl.String("metrics", "", "serve Prometheus /metrics and /healthz on this address (e.g. :9100)")
 	maxWrite := fl.Int("max-write", 1<<20, "maximum size of a single FUSE write")
 	_ = fl.Parse(args)
 	if fl.NArg() != 2 {
@@ -156,7 +159,16 @@ func cmdMount(args []string) {
 	if *ro {
 		opts = append(opts, "ro")
 	}
-	srv, err := fuse.NewServer(fusefs.New(e, fusefs.Options{AttrTimeout: *attr, EntryTimeout: *attr}), mp, &fuse.MountOptions{
+	ops := &metrics.Ops{}
+	if *metricsAddr != "" {
+		go func() {
+			if err := http.ListenAndServe(*metricsAddr, metrics.Handler(e, ops)); err != nil {
+				fmt.Fprintf(os.Stderr, "walfs: metrics server: %v\n", err)
+			}
+		}()
+		fmt.Fprintf(os.Stderr, "walfs: metrics on http://%s/metrics\n", *metricsAddr)
+	}
+	srv, err := fuse.NewServer(fusefs.New(e, fusefs.Options{AttrTimeout: *attr, EntryTimeout: *attr}).WithMetrics(ops), mp, &fuse.MountOptions{
 		FsName: "walfs", Name: "walfs", AllowOther: *allow, Debug: *debug,
 		MaxWrite: *maxWrite, Options: opts, MaxBackground: 64,
 	})

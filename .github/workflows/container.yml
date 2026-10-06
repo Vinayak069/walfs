@@ -1,0 +1,58 @@
+name: container
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t walfs:latest .
+      - name: Run it, write through the mount, scrape metrics
+        run: |
+          set -ex
+          docker run -d --name w --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined \
+            -p 9100:9100 -v walfs-data:/data walfs:latest
+          for i in $(seq 30); do curl -sf localhost:9100/healthz && break; sleep 1; done
+          docker exec w sh -c 'mkdir /mnt/walfs/d && dd if=/dev/urandom of=/mnt/walfs/d/f bs=1M count=32 status=none && sync && ls -l /mnt/walfs/d'
+          curl -s localhost:9100/metrics | tee metrics.txt | grep -E '^walfs_(commits_total|free_blocks|journal_used_blocks|written_bytes_total|ops_write_total) '
+          grep -q '^walfs_written_bytes_total [1-9]' metrics.txt
+          grep -q '^walfs_commits_total [1-9]' metrics.txt
+          docker stop w
+          docker logs w 2>&1 | tail -5
+      - name: Data survives a container restart
+        run: |
+          set -ex
+          docker rm w
+          docker run -d --name w2 --device /dev/fuse --cap-add SYS_ADMIN --security-opt apparmor:unconfined -v walfs-data:/data walfs:latest
+          sleep 4
+          docker exec w2 sh -c 'test "$(stat -c %s /mnt/walfs/d/f)" = 33554432 && echo "file intact after restart"'
+          docker stop w2
+
+  kubernetes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build image
+        run: docker build -t walfs:latest .
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: walfs
+      - name: Deploy and verify
+        run: |
+          set -ex
+          kind load docker-image walfs:latest --name walfs
+          kubectl apply -f deploy/k8s/walfs.yaml
+          kubectl rollout status deployment/walfs --timeout=180s
+          kubectl exec deploy/walfs -- sh -c 'mkdir /mnt/walfs/k && echo hello > /mnt/walfs/k/f && sync && cat /mnt/walfs/k/f'
+          kubectl port-forward svc/walfs-metrics 9100:9100 & sleep 3
+          curl -s localhost:9100/metrics | grep -E '^walfs_(commits_total|free_blocks|journal_used_blocks) '
+          # Restart the pod: the filesystem must be recovered/remounted with data intact.
+          kubectl rollout restart deployment/walfs
+          kubectl rollout status deployment/walfs --timeout=180s
+          kubectl exec deploy/walfs -- cat /mnt/walfs/k/f
+      - if: failure()
+        run: kubectl describe pods; kubectl logs deploy/walfs --tail=50 || true

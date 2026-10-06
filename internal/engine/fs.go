@@ -94,6 +94,55 @@ type Stats struct {
 	HomeMetaBlocks uint64 // metadata blocks written at checkpoint
 	DataBlocks     uint64 // ordered data blocks written at commit
 	Revoked        uint64
+
+	// Commit latency histogram: CommitBuckets[i] counts commits that took at
+	// most CommitBounds[i] (cumulative form is derived when exported).
+	CommitBuckets [len(CommitBounds) + 1]uint64
+	CommitNanos   uint64
+}
+
+// CommitBounds are the upper bounds of the commit-latency histogram.
+var CommitBounds = [...]time.Duration{
+	100 * time.Microsecond, 250 * time.Microsecond, 500 * time.Microsecond,
+	time.Millisecond, 2500 * time.Microsecond, 5 * time.Millisecond,
+	10 * time.Millisecond, 25 * time.Millisecond, 100 * time.Millisecond, time.Second,
+}
+
+func (s *Stats) observeCommit(d time.Duration) {
+	s.CommitNanos += uint64(d)
+	for i, b := range CommitBounds {
+		if d <= b {
+			s.CommitBuckets[i]++
+			return
+		}
+	}
+	s.CommitBuckets[len(CommitBounds)]++
+}
+
+// Gauges are point-in-time values for monitoring.
+type Gauges struct {
+	FreeBlocks, TotalBlocks uint64
+	FreeInodes, TotalInodes uint64
+	JournalUsed, JournalCap uint64 // blocks
+	DirtyDataBlocks         int
+	TxnBlocks               int
+	CacheBlocks             int
+	PendingCheckpoint       int
+	ReadOnly                bool
+}
+
+// Gauges returns a consistent snapshot of the gauges.
+func (fs *FS) Gauges() Gauges {
+	fs.mu.RLock()
+	defer fs.mu.RUnlock()
+	return Gauges{
+		FreeBlocks: fs.freeBlocks, TotalBlocks: fs.sb.TotalBlocks - fs.sb.DataStart,
+		FreeInodes: uint64(fs.freeInodes), TotalInodes: uint64(fs.sb.InodeCount) - 1,
+		JournalUsed: fs.journalUsed(), JournalCap: fs.jsb.Capacity(),
+		DirtyDataBlocks: len(fs.txData), TxnBlocks: fs.txBlocks(),
+		CacheBlocks: fs.c.len(), PendingCheckpoint: len(fs.ckptSet),
+		ReadOnly: fs.aborted != nil || fs.opts.ReadOnly,
+	}
 }
 
 // FS is a mounted walfs.

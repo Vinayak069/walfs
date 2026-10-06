@@ -1,0 +1,74 @@
+# A single-replica walfs instance backed by a PersistentVolumeClaim.
+#
+# FUSE needs /dev/fuse and CAP_SYS_ADMIN. The simplest portable way is a
+# privileged container; clusters with a fuse device plugin can instead request
+# the device and drop `privileged`.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: walfs-data
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests:
+      storage: 5Gi
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: walfs
+  labels: {app: walfs}
+spec:
+  replicas: 1
+  strategy: {type: Recreate}      # the image must never be mounted twice
+  selector:
+    matchLabels: {app: walfs}
+  template:
+    metadata:
+      labels: {app: walfs}
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "9100"
+        prometheus.io/path: /metrics
+    spec:
+      terminationGracePeriodSeconds: 30
+      containers:
+        - name: walfs
+          image: walfs:latest
+          imagePullPolicy: IfNotPresent
+          securityContext:
+            privileged: true
+          env:
+            - {name: WALFS_SIZE, value: 2G}
+            - {name: WALFS_JOURNAL, value: ordered}
+          ports:
+            - {name: metrics, containerPort: 9100}
+          volumeMounts:
+            - {name: data, mountPath: /data}
+          startupProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: metrics}
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests: {cpu: 100m, memory: 256Mi}
+            limits: {memory: 1Gi}
+      volumes:
+        - name: data
+          persistentVolumeClaim: {claimName: walfs-data}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: walfs-metrics
+  labels: {app: walfs}
+spec:
+  selector: {app: walfs}
+  ports:
+    - {name: metrics, port: 9100, targetPort: metrics}
