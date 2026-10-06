@@ -63,15 +63,22 @@ func TestConcurrentWorkloadAsyncCommit(t *testing.T) {
 						if err != nil {
 							continue
 						}
+						// Collect first: the callback runs under the read lock and
+						// must not call back into the filesystem (a second RLock
+						// deadlocks as soon as a writer is waiting).
+						var names []string
 						_ = fs.Readdir(d.Ino, 0, func(e DirEntry) bool {
 							if e.Name != "." && e.Name != ".." && rng.Intn(3) == 0 {
-								if a, err := fs.Lookup(d.Ino, e.Name); err == nil {
-									_, _ = fs.Read(a.Ino, 0, buf)
-									fs.Forget(a.Ino, 1)
-								}
+								names = append(names, e.Name)
 							}
 							return true
 						})
+						for _, name := range names {
+							if a, err := fs.Lookup(d.Ino, name); err == nil {
+								_, _ = fs.Read(a.Ino, 0, buf)
+								fs.Forget(a.Ino, 1)
+							}
+						}
 						fs.Forget(d.Ino, 1)
 					}
 				}(r)

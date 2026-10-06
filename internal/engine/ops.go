@@ -83,7 +83,9 @@ func (fs *FS) Readlink(ino uint64) ([]byte, error) {
 	return append([]byte(nil), b.data[:in.Size]...), nil
 }
 
-// Readdir lists directory ino starting at the resume cookie.
+// Readdir lists directory ino starting at the resume cookie. fn runs under the
+// filesystem read lock and must not call back into the FS: collect entries
+// first and act on them afterwards.
 func (fs *FS) Readdir(ino uint64, cookie uint64, fn func(DirEntry) bool) error {
 	fs.mu.RLock()
 	defer fs.mu.RUnlock()
