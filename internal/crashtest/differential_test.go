@@ -74,3 +74,22 @@ func TestDifferentialSnapshotsTight(t *testing.T) {
 		}
 	}
 }
+
+// The same random workloads with commits running in the background: results
+// and trees must still match the model exactly. Run with -race.
+func TestDifferentialAsync(t *testing.T) {
+	for _, mode := range []engine.JournalMode{engine.ModeOrdered, engine.ModeData} {
+		for seed := int64(1); seed <= 4; seed++ {
+			t.Run(fmt.Sprintf("%s/seed%d", mode, seed), func(t *testing.T) {
+				t.Parallel()
+				cfg := DefaultDiff(seed, mode)
+				cfg.Async = true
+				cfg.Ops = 1200
+				cfg.DirtyLimit = 16 // soft threshold 4: background commits start constantly
+				if err := RunDifferential(cfg); err != nil {
+					t.Fatal(err)
+				}
+			})
+		}
+	}
+}

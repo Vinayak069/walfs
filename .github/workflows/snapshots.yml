@@ -18,3 +18,7 @@ jobs:
         run: go test ./internal/crashtest -run SnapshotChunkedDeleteCrash -count=1 -v -timeout 20m
       - name: Differential + ENOSPC tests (snapshots in the workload)
         run: go test ./internal/crashtest -run 'Differential|ENOSPC' -count=1 -timeout 20m
+      - name: Pipelined (async) commit under the race detector
+        run: |
+          go test ./internal/engine -run 'Concurrent' -race -count=1 -timeout 15m -v
+          go test ./internal/crashtest -run 'DifferentialAsync' -race -short -count=1 -timeout 15m

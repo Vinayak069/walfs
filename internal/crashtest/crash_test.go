@@ -106,3 +106,32 @@ func TestCrashHarnessDetectsBrokenDesigns(t *testing.T) {
 		}
 	})
 }
+
+// Power loss while commits run in the background and operations continue to
+// join the next transaction. The recovered state must still be an exact
+// operation-boundary state no older than the last fsync.
+func TestCrashConsistencyAsync(t *testing.T) {
+	for _, mode := range []engine.JournalMode{engine.ModeOrdered, engine.ModeData} {
+		for seed := int64(200); seed < 200+int64(seedsFor(t, 4)); seed++ {
+			t.Run(fmt.Sprintf("%s/seed%d", mode, seed), func(t *testing.T) {
+				t.Parallel()
+				cfg := DefaultCrash(seed, mode)
+				cfg.Async = true
+				cfg.DirtyLimit = 16
+				cfg.Ops = 250
+				cfg.KeepData = true
+				rep, err := RunCrash(cfg)
+				if err != nil {
+					t.Fatal(err)
+				}
+				t.Log(rep)
+				for _, f := range rep.Failures {
+					t.Error(f)
+				}
+				if rep.ReplayedTxnImages == 0 {
+					t.Error("no crash image needed journal replay")
+				}
+			})
+		}
+	}
+}

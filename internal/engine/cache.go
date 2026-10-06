@@ -20,13 +20,15 @@ type buf struct {
 	err   error
 	used  bool // second-chance bit for eviction
 
-	inTxn  bool   // journaled block belonging to the running transaction
-	isData bool   // ordered-mode data block belonging to the running transaction
-	ckpt   bool   // committed to the journal, home-location write still pending
-	frozen []byte // committed image, kept when the live copy is re-dirtied before checkpoint
+	inTxn  bool // journaled block belonging to the running transaction
+	isData bool // ordered-mode data block belonging to the running transaction
+	ckpt   bool // committed to the journal, home-location write still pending
+	// flushing: ordered data whose commit is in flight. The block must stay
+	// cached (readers must see the new contents) until it is written home.
+	flushing bool
 }
 
-func (b *buf) pinned() bool { return b.inTxn || b.isData || b.ckpt }
+func (b *buf) pinned() bool { return b.inTxn || b.isData || b.ckpt || b.flushing }
 
 // cache is a bounded block cache. Pinned buffers (part of the running
 // transaction or awaiting checkpoint) are never evicted.

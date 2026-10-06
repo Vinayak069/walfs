@@ -110,7 +110,7 @@ func (fs *FS) viewLocked(slot int) *FS {
 		txMeta:       map[uint64]*buf{},
 		txRevoke:     map[uint64]struct{}{},
 		freedPending: map[uint64]struct{}{},
-		ckptSet:      map[uint64]*buf{},
+		ckptImg:      map[uint64][]byte{},
 		refs:         map[uint32]uint64{},
 		dirs:         map[uint32]*dirIndex{},
 		cowIdx:       map[uint32][]*cowRec{},

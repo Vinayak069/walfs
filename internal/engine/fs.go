@@ -71,7 +71,12 @@ type Options struct {
 	DirtyLimitBlocks int           // commit when this many data blocks are dirty (default 8192 = 32 MiB)
 	Clock            func() int64  // nanosecond clock, injectable for tests
 	ReadOnly         bool
-	SkipRecovery     bool // fsck/diagnostics: do not replay the journal
+	// AsyncCommit lets commits run in the background so that operations
+	// continue while a transaction is being written (pipelined commit). With
+	// it off, every commit completes before the triggering call returns,
+	// which makes event order deterministic (the crash tests rely on that).
+	AsyncCommit  bool
+	SkipRecovery bool // fsck/diagnostics: do not replay the journal
 }
 
 func (o *Options) fill() {
@@ -145,7 +150,7 @@ func (fs *FS) Gauges() Gauges {
 		FreeInodes: uint64(fs.freeInodes), TotalInodes: uint64(fs.sb.InodeCount) - 1,
 		JournalUsed: fs.journalUsed(), JournalCap: fs.jsb.Capacity(),
 		DirtyDataBlocks: len(fs.txData), TxnBlocks: fs.txBlocks(),
-		CacheBlocks: fs.c.len(), PendingCheckpoint: len(fs.ckptSet),
+		CacheBlocks: fs.c.len(), PendingCheckpoint: len(fs.ckptImg),
 		ReadOnly:  fs.aborted != nil || fs.opts.ReadOnly,
 		Snapshots: bits.OnesCount32(fs.snapMask), CowRecords: fs.cowRecords(),
 	}
@@ -172,13 +177,15 @@ type FS struct {
 	aborted      error               // set on journal I/O failure: filesystem goes read-only
 
 	// --- journal state ---
-	jsb       format.JournalSuper
-	headOff   uint64 // logical offset where the next transaction starts
-	nextSeq   uint64
-	ckptSet   map[uint64]*buf // committed buffers awaiting a home-location write
-	maxTxn    int             // max blocks in one transaction
-	chunk     int             // blocks per write step
-	lastFlush time.Time
+	jsb          format.JournalSuper
+	headOff      uint64 // logical offset where the next transaction starts
+	nextSeq      uint64
+	ckptImg      map[uint64][]byte // committed block images awaiting a home-location write
+	committing   *commitTx         // commit whose I/O is in flight (nil if none)
+	committedOff uint64            // log offset just past the last finalized commit
+	maxTxn       int               // max blocks in one transaction
+	chunk        int               // blocks per write step
+	lastFlush    time.Time
 
 	// --- allocation state ---
 	allocMu      sync.Mutex // guards counters below when readers call Statfs

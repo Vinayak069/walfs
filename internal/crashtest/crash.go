@@ -38,6 +38,7 @@ type CrashConfig struct {
 	Workers         int
 	MaxFailures     int
 	KeepData        bool // keep full file contents of every state (memory heavy) for precise failure diffs
+	Async           bool // pipelined background commits (event order then varies from run to run)
 }
 
 // DefaultCrash returns a configuration tuned for CI speed.
@@ -104,7 +105,7 @@ type session struct {
 type syncMark struct{ ev, k int } // after ev events, state k is durable
 
 func (cfg *CrashConfig) opts(clock func() int64) engine.Options {
-	return engine.Options{Mode: cfg.Mode, Clock: clock, CacheBlocks: cfg.CacheBlocks, DirtyLimitBlocks: cfg.DirtyLimit}
+	return engine.Options{Mode: cfg.Mode, Clock: clock, CacheBlocks: cfg.CacheBlocks, DirtyLimitBlocks: cfg.DirtyLimit, AsyncCommit: cfg.Async}
 }
 
 func fixedClock() int64 { return 1 << 50 }

@@ -141,6 +141,7 @@ func cmdMount(args []string) {
 	metricsAddr := fl.String("metrics", "", "serve Prometheus /metrics and /healthz on this address (e.g. :9100)")
 	profile := fl.Bool("profile", false, "record mutex and blocking profiles (served under /debug/pprof on the metrics address; adds overhead)")
 	writeback := fl.Bool("writeback", true, "let the kernel cache and coalesce writes (FUSE writeback cache)")
+	asyncCommit := fl.Bool("async-commit", true, "run journal commits in the background so writers are not blocked by commit I/O")
 	maxWrite := fl.Int("max-write", 1<<20, "maximum size of a single FUSE write")
 	_ = fl.Parse(args)
 	if fl.NArg() != 2 {
@@ -156,7 +157,7 @@ func cmdMount(args []string) {
 		die("opening image: %v", err)
 	}
 	e, info, err := engine.Open(dev, engine.Options{
-		Mode: jm, CommitInterval: *commit, ReadOnly: *ro,
+		Mode: jm, CommitInterval: *commit, ReadOnly: *ro, AsyncCommit: *asyncCommit,
 		CacheBlocks:      *cacheMB << 20 / format.BlockSize,
 		DirtyLimitBlocks: *dirtyMB << 20 / format.BlockSize,
 	})

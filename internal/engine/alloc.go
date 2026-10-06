@@ -85,7 +85,7 @@ func (fs *FS) allocBlock(goal uint64, meta bool) (uint32, error) {
 				break
 			}
 			blk := uint64(g)*format.BitsPerBlock + uint64(bit)
-			if _, reserved := fs.freedPending[blk]; reserved {
+			if fs.pendingFree(blk) {
 				sb = bit + 1
 				continue
 			}
@@ -151,17 +151,14 @@ func (fs *FS) freeBlockRaw(blk uint32, class blockClass) error {
 		if old.inTxn {
 			delete(fs.txMeta, b)
 		}
-		if old.ckpt {
-			delete(fs.ckptSet, b)
-		}
 		if old.isData {
 			fs.dropFromTxData(old)
 		}
 		old.inTxn, old.ckpt, old.isData = false, false, false
-		if old.frozen != nil {
-			fs.c.release(old.frozen)
-			old.frozen = nil
-		}
+	}
+	if img, ok := fs.ckptImg[b]; ok {
+		fs.c.release(img)
+		delete(fs.ckptImg, b)
 	}
 	if fs.opts.Mode != ModeNone && (class == classMeta || fs.opts.Mode == ModeData) {
 		fs.txRevoke[b] = struct{}{}

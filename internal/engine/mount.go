@@ -56,11 +56,12 @@ func Open(dev blockdev.Device, opts Options) (*FS, *RecoveryInfo, error) {
 		txMeta:       map[uint64]*buf{},
 		txRevoke:     map[uint64]struct{}{},
 		freedPending: map[uint64]struct{}{},
-		ckptSet:      map[uint64]*buf{},
+		ckptImg:      map[uint64][]byte{},
 		refs:         map[uint32]uint64{},
 		dirs:         map[uint32]*dirIndex{},
 		jsb:          j.Super,
 		headOff:      j.Super.TailOff,
+		committedOff: j.Super.TailOff,
 		nextSeq:      j.Super.TailSeq,
 		lastFlush:    time.Now(),
 		stop:         make(chan struct{}),
@@ -165,8 +166,7 @@ func (fs *FS) commitLoop() {
 		case <-t.C:
 			fs.mu.Lock()
 			if fs.aborted == nil && time.Since(fs.lastFlush) >= iv {
-				_ = fs.commit() // errors latch fs.aborted
-				fs.lastFlush = time.Now()
+				fs.commitAsync() // errors latch fs.aborted
 			}
 			fs.mu.Unlock()
 		}

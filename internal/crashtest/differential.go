@@ -21,7 +21,8 @@ type DiffConfig struct {
 	CacheBlocks   int // small values stress buffer eviction
 	DirtyLimit    int // small values stress forced commits
 	SnapshotEvery int
-	RemountEvery  int // average ops between clean remounts (0: never)
+	RemountEvery  int  // average ops between clean remounts (0: never)
+	Async         bool // pipelined background commits
 }
 
 // DefaultDiff returns a configuration that is fast and exercises the interesting paths.
@@ -56,6 +57,7 @@ func RunDifferential(cfg DiffConfig) (err error) {
 	open := func() (*engine.FS, error) {
 		fs, _, err := engine.Open(dev, engine.Options{
 			Mode: cfg.Mode, Clock: clk.now, CacheBlocks: cfg.CacheBlocks, DirtyLimitBlocks: cfg.DirtyLimit,
+			AsyncCommit: cfg.Async,
 		})
 		return fs, err
 	}
