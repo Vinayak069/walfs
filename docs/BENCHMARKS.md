@@ -28,7 +28,7 @@ one `fsync` after every 4 KiB write.
   best compared *between the two walfs journal modes* and against ext4 for the
   durability-bound workloads.
 * **Durable workloads are the meaningful comparison.** Sequential write with a final
-  fsync matches ext4 (207 vs 199 MB/s) and fsync-per-write reaches 51–68 % of ext4's
+  fsync matches ext4 (207 vs 199 MB/s) and fsync-per-write reaches 51–76 % of ext4's
   rate (journal commit = log write + barrier + commit write + barrier).
 * Small-file creation beats ext4 on this setup because creates are batched into group
   commits and metadata is written to the log sequentially.
