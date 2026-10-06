@@ -1,0 +1,37 @@
+name: cachetest
+
+on:
+  workflow_dispatch:
+
+jobs:
+  cache:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq fuse3
+      - run: go build -o walfs ./cmd/walfs
+      - name: Does the kernel page cache serve repeated reads?
+        run: |
+          uname -r
+          reads() { curl -s localhost:9100/metrics | awk '/^walfs_ops_read_total/{print $2}'; }
+          for args in "-writeback=true" "-writeback=false"; do
+            echo "=== mount $args"
+            rm -f /tmp/c.img; ./walfs mkfs -size 1G /tmp/c.img >/dev/null; mkdir -p /tmp/cm
+            ./walfs mount $args -metrics :9100 /tmp/cm /tmp/c.img 2>/dev/null &
+            DPID=$!; sleep 2
+            dd if=/dev/urandom of=/tmp/cm/f bs=1M count=64 conv=fsync status=none
+            echo "after write:           reads=$(reads)  cached=$(grep -E '^Cached' /proc/meminfo | awk '{print $2}') kB"
+            dd if=/tmp/cm/f of=/dev/null bs=4k status=none; echo "after 1st full read:   reads=$(reads)"
+            dd if=/tmp/cm/f of=/dev/null bs=4k status=none; echo "after 2nd full read:   reads=$(reads)"
+            python3 - <<'PY'
+          import os, random
+          fd = os.open("/tmp/cm/f", os.O_RDONLY)
+          for _ in range(20000): os.pread(fd, 4096, random.randrange(16384) * 4096)
+          os.close(fd)
+          PY
+            echo "after 20k rand preads: reads=$(reads)"
+            fusermount3 -u /tmp/cm; wait $DPID
+          done
