@@ -140,6 +140,7 @@ func cmdMount(args []string) {
 	ro := fl.Bool("ro", false, "mount read-only")
 	metricsAddr := fl.String("metrics", "", "serve Prometheus /metrics and /healthz on this address (e.g. :9100)")
 	profile := fl.Bool("profile", false, "record mutex and blocking profiles (served under /debug/pprof on the metrics address; adds overhead)")
+	writeback := fl.Bool("writeback", true, "let the kernel cache and coalesce writes (FUSE writeback cache)")
 	maxWrite := fl.Int("max-write", 1<<20, "maximum size of a single FUSE write")
 	_ = fl.Parse(args)
 	if fl.NArg() != 2 {
@@ -185,6 +186,12 @@ func cmdMount(args []string) {
 	srv, err := fuse.NewServer(fusefs.NewRouter(fusefs.New(e, fusefs.Options{AttrTimeout: *attr, EntryTimeout: *attr}).WithMetrics(ops)), mp, &fuse.MountOptions{
 		FsName: "walfs", Name: "walfs", AllowOther: *allow, Debug: *debug,
 		MaxWrite: *maxWrite, Options: opts, MaxBackground: 64,
+		// This daemon is the only writer, so the kernel never needs to
+		// invalidate cached file data on its own.
+		ExplicitDataCacheControl: true,
+		EnableSymlinkCaching:     true,
+		MaxReadAhead:             1 << 20,
+		ExtraCapabilities:        wbCaps(*writeback),
 	})
 	if err != nil {
 		_ = e.Close()
@@ -301,4 +308,11 @@ func cmdSnapshot(args []string) {
 	if err := e.Close(); err != nil {
 		die("closing filesystem: %v", err)
 	}
+}
+
+func wbCaps(on bool) uint64 {
+	if on {
+		return fuse.CAP_WRITEBACK_CACHE
+	}
+	return 0
 }

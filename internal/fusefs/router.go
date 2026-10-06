@@ -293,6 +293,7 @@ func (r *Router) Open(c <-chan struct{}, in *fuse.OpenIn, out *fuse.OpenOut) fus
 		if in.Flags&(syscall.O_WRONLY|syscall.O_RDWR|syscall.O_TRUNC|syscall.O_APPEND) != 0 {
 			return fuse.EROFS
 		}
+		out.OpenFlags |= fuse.FOPEN_KEEP_CACHE // snapshots are immutable
 		return fuse.OK
 	}
 	return r.m.Open(c, in, out)

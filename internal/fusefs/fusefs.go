@@ -234,6 +234,9 @@ func (f *FS) Open(_ <-chan struct{}, in *fuse.OpenIn, out *fuse.OpenOut) fuse.St
 			return st(err)
 		}
 	}
+	// Every change to the filesystem goes through this kernel mount, so the
+	// page cache can never be stale: keep it across open() calls.
+	out.OpenFlags |= fuse.FOPEN_KEEP_CACHE
 	return fuse.OK
 }
 

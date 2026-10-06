@@ -3,6 +3,7 @@ package engine
 import (
 	"fmt"
 	"slices"
+	"sync"
 	"syscall"
 	"time"
 
@@ -191,12 +192,26 @@ type homeWriter struct {
 	start   uint64
 	n       int
 	written uint64
+	pooled  *[]byte
 }
 
 const stageBlocks = 256 // 1 MiB
 
+// stagePool recycles the 1 MiB staging buffers: allocating (and zeroing, and
+// later garbage-collecting) one per commit dominated the cost of small
+// commits such as fsync of a single 4 KiB write.
+var stagePool = sync.Pool{New: func() any { b := make([]byte, stageBlocks*format.BlockSize); return &b }}
+
 func newHomeWriter(fs *FS) *homeWriter {
-	return &homeWriter{fs: fs, stage: make([]byte, stageBlocks*format.BlockSize)}
+	sp := stagePool.Get().(*[]byte)
+	return &homeWriter{fs: fs, stage: *sp, pooled: sp}
+}
+
+func (w *homeWriter) release() {
+	if w.pooled != nil {
+		stagePool.Put(w.pooled)
+		w.pooled, w.stage = nil, nil
+	}
 }
 
 func (w *homeWriter) put(blk uint64, data []byte) error {
@@ -230,6 +245,7 @@ func (fs *FS) writeOrderedData() error {
 	}
 	slices.SortFunc(fs.txData, func(a, b *buf) int { return cmp64(a.blk, b.blk) })
 	w := newHomeWriter(fs)
+	defer w.release()
 	for _, b := range fs.txData {
 		if err := w.put(b.blk, b.data); err != nil {
 			return err
@@ -257,6 +273,7 @@ func (fs *FS) commitNoJournal() error {
 		return err
 	}
 	w := newHomeWriter(fs)
+	defer w.release()
 	metas := fs.sortedMeta()
 	for _, b := range metas {
 		if err := w.put(b.blk, b.data); err != nil {
@@ -282,20 +299,29 @@ func (fs *FS) commitNoJournal() error {
 // logWriter streams blocks into the circular log, splitting writes at the
 // wrap point, and maintains the transaction's chained CRC.
 type logWriter struct {
-	fs    *FS
-	off   uint64 // logical offset of the next block
-	stage []byte
-	start uint64 // logical offset of stage[0]
-	n     int
-	crc   uint32
-	bytes uint64
+	fs     *FS
+	off    uint64 // logical offset of the next block
+	stage  []byte
+	start  uint64 // logical offset of stage[0]
+	n      int
+	crc    uint32
+	bytes  uint64
+	pooled *[]byte
 }
 
 func (fs *FS) newLogWriter(seq uint64) *logWriter {
+	sp := stagePool.Get().(*[]byte)
 	return &logWriter{
 		fs: fs, off: fs.headOff, start: fs.headOff,
-		stage: make([]byte, stageBlocks*format.BlockSize),
-		crc:   format.TxnCRCSeed(fs.sb.UUID, seq),
+		stage: *sp, pooled: sp,
+		crc: format.TxnCRCSeed(fs.sb.UUID, seq),
+	}
+}
+
+func (w *logWriter) release() {
+	if w.pooled != nil {
+		stagePool.Put(w.pooled)
+		w.pooled, w.stage = nil, nil
 	}
 }
 
@@ -352,6 +378,7 @@ func (fs *FS) commitJournal() error {
 
 	seq := fs.nextSeq
 	w := fs.newLogWriter(seq)
+	defer w.release()
 	for i := 0; i < len(revokes); i += format.DescCapacity {
 		j := min(i+format.DescCapacity, len(revokes))
 		if err := w.emit(format.EncodeRevoke(seq, revokes[i:j]), true); err != nil {
@@ -439,6 +466,7 @@ func (fs *FS) checkpoint() error {
 	}
 	slices.SortFunc(bs, func(a, b *buf) int { return cmp64(a.blk, b.blk) })
 	w := newHomeWriter(fs)
+	defer w.release()
 	for _, b := range bs {
 		img := b.data
 		if b.frozen != nil {
