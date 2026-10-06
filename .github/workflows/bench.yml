@@ -52,14 +52,26 @@ jobs:
           # Populate ~1.5 GiB so that creation time can be seen to be independent of data size.
           mkdir $MNT/pre && for i in 1 2 3; do dd if=/dev/urandom of=$MNT/pre/f$i bs=1M count=512 status=none; done
           sync; sleep 6
+          cow() { fio --name=$1 --filename=$MNT/pre/f1 --rw=randwrite --bs=4k --size=512M --ioengine=psync \
+                    --numjobs=1 --randrepeat=0 --time_based --runtime=15 --end_fsync=1 \
+                    --output-format=json --output=cow-$1.json >/dev/null; python3 scripts/fio_iops.py cow-$1.json; }
+          used() { df -B1M --output=used $MNT | tail -1 | tr -d ' '; }
+          echo "4 KiB random overwrites of existing data, no snapshot:        $(cow base)" | tee snapcost.txt
+          sync; sleep 6
           t0=$(date +%s%N); mkdir $MNT/.snapshots/bench; t1=$(date +%s%N)
-          echo "snapshot create on ~1.5 GiB of data: $(( (t1-t0)/1000000 )) ms" | tee snapcost.txt
+          echo "snapshot create on ~1.5 GiB of data: $(( (t1-t0)/1000000 )) ms" | tee -a snapcost.txt
+          u0=$(used)
+          echo "same overwrites with a snapshot (every first touch copies):   $(cow first)" | tee -a snapcost.txt
+          u1=$(used)
+          echo "space preserved for the snapshot by those overwrites: $((u1-u0)) MiB" | tee -a snapcost.txt
+          echo "same overwrites again (most blocks already copied):           $(cow second)" | tee -a snapcost.txt
           scripts/bench.sh walfs-ordered-snap $MNT results
           # Deleting the snapshot returns the space preserved while the benchmark ran.
-          df -B1M $MNT | tail -1 | tee -a snapcost.txt
+          u2=$(used)
           t0=$(date +%s%N); rmdir $MNT/.snapshots/bench; t1=$(date +%s%N)
-          echo "snapshot delete (after the benchmark overwrote data under it): $(( (t1-t0)/1000000 )) ms" | tee -a snapcost.txt
-          df -B1M $MNT | tail -1 | tee -a snapcost.txt
+          echo "snapshot delete (after $((u2-u0)) MiB were preserved under it): $(( (t1-t0)/1000000 )) ms" | tee -a snapcost.txt
+          sync; sleep 2
+          echo "space returned by deleting the snapshot: $((u2 - $(used))) MiB" | tee -a snapcost.txt
           fusermount3 -u $MNT; wait
           ./walfs fsck $IMG
           rm -f $IMG
@@ -91,3 +103,4 @@ jobs:
             results
             summary.md
             snapcost.txt
+            cow-*.json
