@@ -92,8 +92,8 @@ func (r *CrashReport) String() string {
 type session struct {
 	cfg     CrashConfig
 	rec     *blockdev.RecordingDevice
-	digests [][32]byte  // digests[k]: expected state after k completed ops
-	snaps   []*Snapshot // compacted snapshots, for failure diagnostics
+	digests [][32]byte // digests[k]: expected state after k completed ops
+	snaps   []*Full    // compacted snapshots, for failure diagnostics
 	opText  []string
 	// minK[p]: lowest acceptable k for a crash after p events; computed from
 	// operations that completed (including their sync) by then.
@@ -134,7 +134,7 @@ func RunCrash(cfg CrashConfig) (*CrashReport, error) {
 	er := &Runner{FS: EngineVFS{fs}}
 	g := NewGen(cfg.Gen)
 	ses := &session{cfg: cfg, rec: rec}
-	snap0, err := TakeSnapshot(ModelVFS{m}, true)
+	snap0, err := TakeFull(ModelVFS{m}, true)
 	if err != nil {
 		return nil, err
 	}
@@ -155,7 +155,7 @@ func RunCrash(cfg CrashConfig) (*CrashReport, error) {
 		if a := fs.Aborted(); a != nil {
 			return nil, fmt.Errorf("op %d: engine aborted: %v", i, a)
 		}
-		s, err := TakeSnapshot(ModelVFS{m}, true)
+		s, err := TakeFull(ModelVFS{m}, true)
 		if err != nil {
 			return nil, err
 		}
@@ -186,7 +186,7 @@ func RunCrash(cfg CrashConfig) (*CrashReport, error) {
 	return rep, nil
 }
 
-func (s *session) digest(sn *Snapshot) [32]byte {
+func (s *session) digest(sn *Full) [32]byte {
 	if s.cfg.ExactData {
 		return sn.Digest()
 	}
@@ -413,7 +413,7 @@ func (s *session) mountCheck(img *blockdev.MemDevice, j job, lo, hi int, fail fu
 		rep.ReplayedTxnImages++
 		mu.Unlock()
 	}
-	snap, err := TakeSnapshot(EngineVFS{fs}, true)
+	snap, err := TakeFull(EngineVFS{fs}, true)
 	if err != nil {
 		fail(j, "snapshot after recovery: %v", err)
 		return 0, false
@@ -435,7 +435,7 @@ func (s *session) mountCheck(img *blockdev.MemDevice, j job, lo, hi int, fail fu
 		}
 		if k < 0 {
 			fail(j, "recovered tree matches no operation-boundary state in [%d,%d] (%d files); closest diagnostics: %s",
-				lo, hi, len(snap.Paths), s.explain(snap, lo, hi))
+				lo, hi, len(snap.Main.Paths), s.explain(snap, lo, hi))
 			return 0, false
 		}
 		*want, *have = d, true
@@ -457,10 +457,10 @@ func (s *session) mountCheck(img *blockdev.MemDevice, j job, lo, hi int, fail fu
 }
 
 // explain diffs a bad snapshot against the nearest acceptable state.
-func (s *session) explain(snap *Snapshot, lo, hi int) string {
+func (s *session) explain(snap *Full, lo, hi int) string {
 	best, bestK := "", -1
 	for k := lo; k <= hi && k < len(s.snaps); k++ {
-		d := Diff(s.snaps[k], snap)
+		d := DiffFull(s.snaps[k], snap)
 		if bestK < 0 || len(d) < len(best) {
 			best, bestK = d, k
 		}

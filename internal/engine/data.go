@@ -170,11 +170,15 @@ func (fs *FS) writeChunk(ino uint32, in *format.Inode, ctx Ctx, off uint64, data
 		switch {
 		case created:
 			b = fs.c.getNew(uint64(pb), take < format.BlockSize)
-		case take == format.BlockSize:
-			b = fs.c.getNew(uint64(pb), false)
 		default:
-			if b, err = fs.c.get(uint64(pb)); err != nil {
+			// Overwriting an existing block. A full-block overwrite needs
+			// the old contents only if a snapshot still sees them.
+			if take == format.BlockSize && (fs.snapMask == 0 || fs.snapNeeds(pb) == 0) {
+				b = fs.c.getNew(uint64(pb), false)
+			} else if b, err = fs.c.get(uint64(pb)); err != nil {
 				werr = syscall.EIO
+			} else if err = fs.preserveData(b); err != nil {
+				werr = err
 			}
 		}
 		if werr != nil {
@@ -220,6 +224,9 @@ func (fs *FS) zeroTail(in *format.Inode, newSize uint64) error {
 	b, err := fs.c.get(uint64(pb))
 	if err != nil {
 		return syscall.EIO
+	}
+	if err := fs.preserveData(b); err != nil {
+		return err
 	}
 	clear(b.data[off:])
 	fs.dirtyData(b)
@@ -503,6 +510,9 @@ func (fs *FS) punch(ino uint32, in *format.Inode, off, end uint64) error {
 		b, err := fs.c.get(uint64(pb))
 		if err != nil {
 			return syscall.EIO
+		}
+		if err := fs.preserveData(b); err != nil {
+			return err
 		}
 		clear(b.data[pos%format.BlockSize : stop-pos/format.BlockSize*format.BlockSize])
 		fs.dirtyData(b)

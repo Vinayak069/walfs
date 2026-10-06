@@ -1,0 +1,18 @@
+name: snapshots
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Snapshot unit tests
+        run: go test ./internal/engine -run Snapshot -count=1 -v -timeout 10m
+      - name: Differential + ENOSPC tests (snapshots in the workload)
+        run: go test ./internal/crashtest -run 'Differential|ENOSPC' -short -count=1 -timeout 20m

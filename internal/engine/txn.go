@@ -45,6 +45,14 @@ func (fs *FS) metaBuf(blk uint64) (*buf, error) {
 	if err != nil {
 		return nil, err
 	}
+	if !b.inTxn && fs.snapMask != 0 {
+		// The block is about to change for the first time in this
+		// transaction: snapshots that still see its current contents get a
+		// copy first. b.data is the last committed image here.
+		if err := fs.preserve(uint32(blk), b.data, true); err != nil {
+			return nil, err
+		}
+	}
 	fs.joinTxn(b)
 	return b, nil
 }
@@ -87,6 +95,20 @@ func (fs *FS) beginOp(reserve, needBlocks int) error {
 	if full {
 		if err := fs.commit(); err != nil {
 			return syscall.EIO
+		}
+	}
+	if fs.snapMask != 0 {
+		// Overwriting snapshotted blocks needs spare blocks for the copies.
+		// Check up front so that an operation never fails half-way.
+		required := int64(needBlocks) + int64(reserve) + 8
+		avail := func() int64 { return int64(fs.freeBlocks) - int64(len(fs.freedPending)) }
+		if avail() < required {
+			if err := fs.commit(); err != nil {
+				return syscall.EIO
+			}
+			if avail() < required {
+				return syscall.ENOSPC
+			}
 		}
 	}
 	return nil

@@ -117,6 +117,16 @@ const (
 // commits (freedPending): otherwise an ordered-mode data write could land on
 // a block that the pre-commit on-disk state still treats as metadata.
 func (fs *FS) freeBlock(blk uint32, class blockClass) error {
+	if fs.snapMask != 0 {
+		if done, err := fs.transferToSnapshots(blk, class); err != nil || done {
+			return err
+		}
+	}
+	return fs.freeBlockRaw(blk, class)
+}
+
+// freeBlockRaw releases blk without consulting snapshots.
+func (fs *FS) freeBlockRaw(blk uint32, class blockClass) error {
 	b := uint64(blk)
 	if b < fs.sb.DataStart || b >= fs.sb.TotalBlocks {
 		return corruptf("freeing out-of-range block %d", b)

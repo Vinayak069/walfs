@@ -117,6 +117,8 @@ type Superblock struct {
 	InodeTableBlocks  uint64
 	DataStart         uint64
 	OrphanHead        uint32 // head of the singly linked list of unlinked-but-open inodes
+	SnapTable         uint32 // block of the snapshot table (0: no snapshot has ever been taken)
+	CowHead           uint32 // first block of the copy-on-write record log
 	UUID              [16]byte
 	CreatedNS         int64
 }
@@ -145,6 +147,8 @@ func (s *Superblock) Marshal() []byte {
 	le.PutUint32(b[104:], s.OrphanHead)
 	copy(b[108:124], s.UUID[:])
 	le.PutUint64(b[128:], uint64(s.CreatedNS))
+	le.PutUint32(b[136:], s.SnapTable)
+	le.PutUint32(b[140:], s.CowHead)
 	le.PutUint32(b[sbCRCOff:], CRC32C(0, b[:sbCRCOff]))
 	return b
 }
@@ -178,6 +182,8 @@ func UnmarshalSuperblock(b []byte) (*Superblock, error) {
 		DataStart:         le.Uint64(b[96:]),
 		OrphanHead:        le.Uint32(b[104:]),
 		CreatedNS:         int64(le.Uint64(b[128:])),
+		SnapTable:         le.Uint32(b[136:]),
+		CowHead:           le.Uint32(b[140:]),
 	}
 	copy(s.UUID[:], b[108:124])
 	if s.Version != Version {

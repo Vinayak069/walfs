@@ -36,6 +36,7 @@ type Stats struct {
 	BlocksUsed, MetaBlocks                  uint64
 	Orphans                                 int
 	JournalTxns                             int // committed transactions still in the log (unreplayed)
+	Snapshots, CowRecords, SnapBlocks       int
 }
 
 // OK reports whether no inconsistency was found.
@@ -54,6 +55,10 @@ func (r *Report) String() string {
 	fmt.Fprintf(&sb, "%d inodes (%d dirs, %d files, %d symlinks, %d other), %d data blocks in use, %d orphans",
 		r.Stats.Inodes, r.Stats.Dirs, r.Stats.Files, r.Stats.Symlinks, r.Stats.Specials,
 		r.Stats.BlocksUsed, r.Stats.Orphans)
+	if r.Stats.Snapshots > 0 {
+		fmt.Fprintf(&sb, "; %d snapshot(s), %d COW records, %d snapshot-owned blocks",
+			r.Stats.Snapshots, r.Stats.CowRecords, r.Stats.SnapBlocks)
+	}
 	return sb.String()
 }
 
@@ -82,6 +87,8 @@ type checker struct {
 	subdirs map[uint32]uint32 // dir inode -> number of child directories (via ..)
 	parent  map[uint32]uint32 // dir inode -> parent per its ".." entry
 	dirOf   map[uint32]uint32 // dir inode -> directory holding its entry
+
+	view bool // checking a snapshot view: inodes are found by scanning the table
 }
 
 type info struct {
@@ -145,6 +152,7 @@ func Check(dev blockdev.Device, o Options) (*Report, error) {
 	c.checkDirs()
 	c.checkLinks()
 	c.checkOrphans()
+	c.checkSnapshots()
 	c.checkBitmaps()
 	if c.full {
 		c.rep.Errors = append(c.rep.Errors, "... too many errors, output truncated")
@@ -215,14 +223,15 @@ func (c *checker) claim(blk uint32, ino uint32, what string) bool {
 func (c *checker) scanInodes() error {
 	sb := c.sb
 	// Slot 0 must be marked used, and inode 1 must exist as a directory.
-	if !format.BitTest(c.ibmap, 0) {
+	if !c.view && !format.BitTest(c.ibmap, 0) {
 		c.errf("inode bitmap: reserved inode 0 not marked used")
 	}
 	var tbl []byte
 	var tblBlk uint64 = ^uint64(0)
 	for ino := uint32(1); ino < sb.InodeCount; ino++ {
-		allocated := format.BitTest(c.ibmap, ino)
-		if !allocated {
+		// A snapshot view has no inode bitmap of its own (the bitmap is never
+		// preserved): an inode is in use iff its slot holds a non-zero mode.
+		if !c.view && !format.BitTest(c.ibmap, ino) {
 			continue
 		}
 		blk := sb.InodeTableStart + uint64(ino/format.InodesPerBlock)
@@ -240,7 +249,9 @@ func (c *checker) scanInodes() error {
 			continue
 		}
 		if in.Mode == 0 {
-			c.errf("inode %d: marked allocated but has no mode", ino)
+			if !c.view {
+				c.errf("inode %d: marked allocated but has no mode", ino)
+			}
 			continue
 		}
 		c.inodes[ino] = &info{ino: ino, in: in}

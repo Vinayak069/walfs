@@ -31,6 +31,7 @@ type node struct {
 type Model struct {
 	nodes map[uint64]*node
 	next  uint64
+	snaps map[string]*Model
 	// Now supplies the timestamp of the current operation.
 	Now func() int64
 }
@@ -43,7 +44,7 @@ const (
 
 // New returns a model holding only an empty root directory (inode 1).
 func New(now func() int64) *Model {
-	m := &Model{nodes: map[uint64]*node{}, next: 2, Now: now}
+	m := &Model{nodes: map[uint64]*node{}, next: 2, Now: now, snaps: map[string]*Model{}}
 	t := now()
 	m.nodes[1] = &node{
 		mode: format.SIFDIR | 0o755, nlink: 2,
@@ -630,4 +631,76 @@ func (m *Model) List() (items []Item, totalData uint64) {
 	}
 	walk(1, "")
 	return
+}
+
+// Clone returns a deep copy of the filesystem state (without snapshots).
+func (m *Model) Clone() *Model {
+	c := &Model{nodes: make(map[uint64]*node, len(m.nodes)), next: m.next, Now: m.Now, snaps: map[string]*Model{}}
+	for ino, n := range m.nodes {
+		cn := *n
+		cn.data = append([]byte(nil), n.data...)
+		cn.target = append([]byte(nil), n.target...)
+		if n.ents != nil {
+			cn.ents = make(map[string]uint64, len(n.ents))
+			for k, v := range n.ents {
+				cn.ents[k] = v
+			}
+		}
+		c.nodes[ino] = &cn
+	}
+	return c
+}
+
+// MaxSnapshots mirrors the on-disk limit.
+const MaxSnapshots = format.MaxSnapshots
+
+// CreateSnapshot freezes the current state under name.
+func (m *Model) CreateSnapshot(name string) error {
+	switch {
+	case name == "" || name == "." || name == "..":
+		return syscall.EINVAL
+	case len(name) > format.SnapNameMax:
+		return syscall.ENAMETOOLONG
+	}
+	for i := 0; i < len(name); i++ {
+		if name[i] == '/' || name[i] == 0 {
+			return syscall.EINVAL
+		}
+	}
+	if _, ok := m.snaps[name]; ok {
+		return syscall.EEXIST
+	}
+	if len(m.snaps) >= MaxSnapshots {
+		return syscall.ENOSPC
+	}
+	m.snaps[name] = m.Clone()
+	return nil
+}
+
+// DeleteSnapshot removes a snapshot.
+func (m *Model) DeleteSnapshot(name string) error {
+	if _, ok := m.snaps[name]; !ok {
+		return syscall.ENOENT
+	}
+	delete(m.snaps, name)
+	return nil
+}
+
+// SnapshotNames lists snapshots in name order.
+func (m *Model) SnapshotNames() []string {
+	var out []string
+	for n := range m.snaps {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
+// Snapshot returns the frozen model for name.
+func (m *Model) Snapshot(name string) (*Model, error) {
+	s, ok := m.snaps[name]
+	if !ok {
+		return nil, syscall.ENOENT
+	}
+	return s, nil
 }

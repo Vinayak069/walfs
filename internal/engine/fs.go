@@ -11,6 +11,7 @@ package engine
 import (
 	"errors"
 	"fmt"
+	"math/bits"
 	"sync"
 	"syscall"
 	"time"
@@ -87,13 +88,15 @@ func (o *Options) fill() {
 
 // Stats are cumulative counters, useful for benchmarking and tests.
 type Stats struct {
-	Commits        uint64
-	Checkpoints    uint64
-	Flushes        uint64
-	JournalBlocks  uint64 // blocks written to the log (descriptors, data, commits)
-	HomeMetaBlocks uint64 // metadata blocks written at checkpoint
-	DataBlocks     uint64 // ordered data blocks written at commit
-	Revoked        uint64
+	Commits         uint64
+	Checkpoints     uint64
+	Flushes         uint64
+	JournalBlocks   uint64 // blocks written to the log (descriptors, data, commits)
+	HomeMetaBlocks  uint64 // metadata blocks written at checkpoint
+	DataBlocks      uint64 // ordered data blocks written at commit
+	Revoked         uint64
+	SnapPreserved   uint64 // blocks copied because a snapshot still saw them
+	SnapTransferred uint64 // freed blocks handed over to snapshots
 
 	// Commit latency histogram: CommitBuckets[i] counts commits that took at
 	// most CommitBounds[i] (cumulative form is derived when exported).
@@ -129,6 +132,8 @@ type Gauges struct {
 	CacheBlocks             int
 	PendingCheckpoint       int
 	ReadOnly                bool
+	Snapshots               int
+	CowRecords              int
 }
 
 // Gauges returns a consistent snapshot of the gauges.
@@ -141,7 +146,8 @@ func (fs *FS) Gauges() Gauges {
 		JournalUsed: fs.journalUsed(), JournalCap: fs.jsb.Capacity(),
 		DirtyDataBlocks: len(fs.txData), TxnBlocks: fs.txBlocks(),
 		CacheBlocks: fs.c.len(), PendingCheckpoint: len(fs.ckptSet),
-		ReadOnly: fs.aborted != nil || fs.opts.ReadOnly,
+		ReadOnly:  fs.aborted != nil || fs.opts.ReadOnly,
+		Snapshots: bits.OnesCount32(fs.snapMask), CowRecords: fs.cowRecords(),
 	}
 }
 
@@ -192,6 +198,20 @@ type FS struct {
 	dirMu   sync.Mutex
 	dirs    map[uint32]*dirIndex
 	dirEnts int
+
+	// --- snapshots (see snapshot.go) ---
+	snapTable   *format.SnapTable
+	snaps       [format.MaxSnapshots]*snapState
+	snapMask    uint32 // active snapshots
+	cowIdx      map[uint32][]*cowRec
+	cowBlocks   []uint32
+	cowFree     []*cowRec
+	snapSys     map[uint32]struct{} // blocks that belong to the snapshot machinery itself
+	snapViews   [format.MaxSnapshots]*FS
+	snapReserve int
+	// set only on a snapshot view:
+	snapParent *FS
+	snapSlot   int
 
 	stats  Stats
 	closed bool

@@ -72,7 +72,13 @@ func Open(dev blockdev.Device, opts Options) (*FS, *RecoveryInfo, error) {
 	if err := fs.loadCounters(); err != nil {
 		return nil, nil, err
 	}
+	if err := fs.loadSnapshots(); err != nil {
+		return nil, nil, fmt.Errorf("loading snapshots: %w", err)
+	}
 	if !opts.ReadOnly {
+		if err := fs.resumeDeletions(); err != nil {
+			return nil, nil, fmt.Errorf("finishing snapshot deletion: %w", err)
+		}
 		n, err := fs.recoverOrphans()
 		if err != nil {
 			return nil, nil, fmt.Errorf("orphan recovery: %w", err)

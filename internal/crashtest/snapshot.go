@@ -240,3 +240,86 @@ func (s *Snapshot) Compact() {
 		n.Data = nil
 	}
 }
+
+// Full is a main-tree snapshot plus the tree of every filesystem snapshot.
+type Full struct {
+	Main  *Snapshot
+	Snaps map[string]*Snapshot
+}
+
+// TakeFull walks the live tree and every snapshot view.
+func TakeFull(fs VFS, withTimes bool) (*Full, error) {
+	f := &Full{Snaps: map[string]*Snapshot{}}
+	var err error
+	if f.Main, err = TakeSnapshot(fs, withTimes); err != nil {
+		return nil, err
+	}
+	for _, name := range fs.SnapshotNames() {
+		v, err := fs.SnapshotView(name)
+		if err != nil {
+			return nil, fmt.Errorf("snapshot %q: %w", name, err)
+		}
+		if f.Snaps[name], err = TakeSnapshot(v, withTimes); err != nil {
+			return nil, fmt.Errorf("snapshot %q: %w", name, err)
+		}
+	}
+	return f, nil
+}
+
+func (f *Full) names() []string {
+	var out []string
+	for n := range f.Snaps {
+		out = append(out, n)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (f *Full) digestOpt(withData bool) [32]byte {
+	h := sha256.New()
+	d := f.Main.digestOpt(withData)
+	h.Write(d[:])
+	for _, n := range f.names() {
+		h.Write([]byte("\x00snap:" + n + "\x00"))
+		d := f.Snaps[n].digestOpt(withData)
+		h.Write(d[:])
+	}
+	var out [32]byte
+	copy(out[:], h.Sum(nil))
+	return out
+}
+
+func (f *Full) Digest() [32]byte       { return f.digestOpt(true) }
+func (f *Full) DigestNoData() [32]byte { return f.digestOpt(false) }
+
+// Compact drops file contents everywhere (keeping hashes).
+func (f *Full) Compact() {
+	f.Main.Compact()
+	for _, s := range f.Snaps {
+		s.Compact()
+	}
+}
+
+// DiffFull describes differences between two full snapshots.
+func DiffFull(want, got *Full) string {
+	var out []string
+	if d := Diff(want.Main, got.Main); d != "" {
+		out = append(out, "main tree:\n"+d)
+	}
+	for _, n := range want.names() {
+		g, ok := got.Snaps[n]
+		if !ok {
+			out = append(out, fmt.Sprintf("snapshot %q missing", n))
+			continue
+		}
+		if d := Diff(want.Snaps[n], g); d != "" {
+			out = append(out, fmt.Sprintf("snapshot %q:\n%s", n, d))
+		}
+	}
+	for _, n := range got.names() {
+		if _, ok := want.Snaps[n]; !ok {
+			out = append(out, fmt.Sprintf("unexpected snapshot %q", n))
+		}
+	}
+	return strings.Join(out, "\n")
+}

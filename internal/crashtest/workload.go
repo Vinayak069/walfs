@@ -46,6 +46,7 @@ type GenConfig struct {
 	Names       int    // size of the name pool (default 8)
 	SyncPercent int    // chance (per mille) of a sync op
 	Sparse      bool   // allow rare writes far past EOF (double-indirect blocks)
+	NoSnapshots bool   // never create, delete or read snapshots
 }
 
 // Gen produces operations.
@@ -158,6 +159,9 @@ func (g *Gen) Next(m *model.Model) Op {
 		{"chmod", 2}, {"chown", 2}, {"utimens", 2}, {"fallocate", 3}, {"read", 5},
 		{"readdir", 2}, {"stat", 3},
 	}
+	if !g.cfg.NoSnapshots {
+		table = append(table, w{"snap", 3}, w{"snapdel", 2}, w{"snapread", 4})
+	}
 	if !g.cfg.NoHandles {
 		table = append(table, w{"open", 3}, w{"hread", 1}, w{"hclose", 3}, w{"hstat", 1})
 		if !g.cfg.NoOverwrite {
@@ -252,6 +256,13 @@ func (g *Gen) Next(m *model.Model) Op {
 		}
 	case "read":
 		op.A = filePath()
+		op.Off = uint64(g.rng.Int63n(int64(sizes[op.A]) + 1))
+		op.Len = uint64(1 + g.rng.Intn(70000))
+	case "snap", "snapdel":
+		op.B = fmt.Sprintf("s%d", g.rng.Intn(4))
+	case "snapread":
+		op.A = filePath()
+		op.B = fmt.Sprintf("s%d", g.rng.Intn(4))
 		op.Off = uint64(g.rng.Int63n(int64(sizes[op.A]) + 1))
 		op.Len = uint64(1 + g.rng.Intn(70000))
 	case "readdir":
@@ -405,6 +416,16 @@ func (r *Runner) Apply(op Op) (res Result) {
 	switch op.Kind {
 	case "sync":
 		res.Err = fs.Sync()
+	case "snap":
+		res.Err = fs.CreateSnapshot(op.B)
+	case "snapdel":
+		res.Err = fs.DeleteSnapshot(op.B)
+	case "snapread":
+		v, err := fs.SnapshotView(op.B)
+		if err != nil {
+			return Result{Err: err}
+		}
+		return (&Runner{FS: v}).Apply(Op{Kind: "read", A: op.A, Off: op.Off, Len: op.Len})
 	case "create", "mkdir", "mknod", "symlink":
 		p, base, err := r.resolveParent(op.A)
 		if err != nil {

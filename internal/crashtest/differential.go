@@ -76,12 +76,12 @@ func RunDifferential(cfg DiffConfig) (err error) {
 		return fmt.Errorf("seed %d op %d: %s\nrecent ops:\n  %s", cfg.Gen.Seed, i, fmt.Sprintf(f, a...), joinLines(tail))
 	}
 	snapCmp := func(i int, what string) error {
-		sa, e1 := TakeSnapshot(ModelVFS{m}, true)
-		sb, e2 := TakeSnapshot(EngineVFS{fs}, true)
+		sa, e1 := TakeFull(ModelVFS{m}, true)
+		sb, e2 := TakeFull(EngineVFS{fs}, true)
 		if e1 != nil || e2 != nil {
 			return fail(i, "%s: snapshot error model=%v engine=%v", what, e1, e2)
 		}
-		if d := Diff(sa, sb); d != "" {
+		if d := DiffFull(sa, sb); d != "" {
 			return fail(i, "%s: tree mismatch:\n%s", what, d)
 		}
 		return nil

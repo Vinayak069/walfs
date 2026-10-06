@@ -10,6 +10,8 @@
 package crashtest
 
 import (
+	"sort"
+
 	"github.com/vinayak-singh/walfs/internal/engine"
 	"github.com/vinayak-singh/walfs/internal/model"
 )
@@ -35,6 +37,11 @@ type VFS interface {
 	// Forget drops kernel references (a no-op in the model).
 	Forget(ino uint64, n uint64)
 	Sync() error
+
+	CreateSnapshot(name string) error
+	DeleteSnapshot(name string) error
+	SnapshotNames() []string
+	SnapshotView(name string) (VFS, error)
 }
 
 // EngineVFS adapts *engine.FS.
@@ -62,6 +69,23 @@ func (e EngineVFS) ReaddirAll(ino uint64, pageSize int) ([]engine.DirEntry, erro
 	}
 }
 
+func (e EngineVFS) SnapshotNames() []string {
+	var out []string
+	for _, s := range e.FS.ListSnapshots() {
+		out = append(out, s.Name)
+	}
+	sort.Strings(out)
+	return out
+}
+
+func (e EngineVFS) SnapshotView(name string) (VFS, error) {
+	v, err := e.FS.SnapshotView(name)
+	if err != nil {
+		return nil, err
+	}
+	return EngineVFS{v}, nil
+}
+
 // ModelVFS adapts *model.Model.
 type ModelVFS struct{ *model.Model }
 
@@ -70,3 +94,11 @@ func (m ModelVFS) ReaddirAll(ino uint64, _ int) ([]engine.DirEntry, error) {
 }
 func (m ModelVFS) Forget(uint64, uint64) {}
 func (m ModelVFS) Sync() error           { return nil }
+
+func (m ModelVFS) SnapshotView(name string) (VFS, error) {
+	v, err := m.Model.Snapshot(name)
+	if err != nil {
+		return nil, err
+	}
+	return ModelVFS{v}, nil
+}

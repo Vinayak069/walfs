@@ -145,11 +145,16 @@ func (fs *FS) Forget(ino uint64, n uint64) {
 // list lets mount-time recovery finish the job after a crash.
 
 func (fs *FS) setOrphanHead(v uint32) error {
+	fs.sb.OrphanHead = v
+	return fs.writeSuper()
+}
+
+// writeSuper journals the in-memory superblock.
+func (fs *FS) writeSuper() error {
 	b, err := fs.metaBuf(0)
 	if err != nil {
 		return syscall.EIO
 	}
-	fs.sb.OrphanHead = v
 	copy(b.data, fs.sb.Marshal())
 	return nil
 }
