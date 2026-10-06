@@ -244,7 +244,7 @@ func (fs *FS) truncate(ino uint32, in *format.Inode, newSize uint64) error {
 	}
 	from := (newSize + format.BlockSize - 1) / format.BlockSize
 	for {
-		st := freeState{budget: truncBudget}
+		st := freeState{budget: truncBudget, leaf: classData}
 		if err := fs.freeFrom(in, from, &st); err != nil {
 			_ = fs.putInode(ino, in)
 			return errnoOrNil(err)

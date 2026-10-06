@@ -199,6 +199,19 @@ type freeState struct {
 	budget int    // data+indirect blocks we may still free in this pass
 	low    uint64 // every mapped file block >= low has been freed
 	done   bool   // false when the budget ran out
+	// leaf is how the blocks at the leaves of the map were used. Directory
+	// and symlink blocks are journaled metadata and must be revoked when
+	// freed, otherwise replaying their stale journal image after a crash
+	// would clobber the file data they are later reused for.
+	leaf blockClass
+}
+
+// leafClassOf returns the class of an inode's leaf blocks.
+func leafClassOf(in *format.Inode) blockClass {
+	if in.IsReg() {
+		return classData
+	}
+	return classMeta
 }
 
 func span(level int) uint64 {
@@ -255,7 +268,7 @@ func (fs *FS) freeFrom(in *format.Inode, from uint64, st *freeState) error {
 		if err := fs.validBlk(in.Direct[i]); err != nil {
 			return err
 		}
-		if err := fs.freeBlock(in.Direct[i], classData); err != nil {
+		if err := fs.freeBlock(in.Direct[i], st.leaf); err != nil {
 			return err
 		}
 		in.Direct[i] = 0
@@ -295,7 +308,7 @@ func (fs *FS) freeSubtree(in *format.Inode, ptr uint32, level int, base, from ui
 			if err := fs.validBlk(child); err != nil {
 				return false, err
 			}
-			if err := fs.freeBlock(child, classData); err != nil {
+			if err := fs.freeBlock(child, st.leaf); err != nil {
 				return false, err
 			}
 			le.PutUint32(b.data[i*4:], 0)

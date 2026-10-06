@@ -208,7 +208,7 @@ func (fs *FS) destroyInode(ino uint32, in *format.Inode, onOrphan bool) error {
 		onOrphan = true
 	}
 	for in.Blocks > 0 {
-		st := freeState{budget: truncBudget}
+		st := freeState{budget: truncBudget, leaf: leafClassOf(in)}
 		if err := fs.freeFrom(in, 0, &st); err != nil {
 			_ = fs.putInode(ino, in)
 			return err
