@@ -24,6 +24,7 @@ func TestCrashConsistency(t *testing.T) {
 			t.Run(fmt.Sprintf("%s/seed%d", mode, seed), func(t *testing.T) {
 				t.Parallel()
 				cfg := DefaultCrash(seed, mode)
+				cfg.KeepData = true
 				if testing.Short() {
 					cfg.Ops = 120
 					cfg.PointStride = 2

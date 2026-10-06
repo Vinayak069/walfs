@@ -37,6 +37,7 @@ type CrashConfig struct {
 	CrashSeed       int64 // randomness of subset selection
 	Workers         int
 	MaxFailures     int
+	KeepData        bool // keep full file contents of every state (memory heavy) for precise failure diffs
 }
 
 // DefaultCrash returns a configuration tuned for CI speed.
@@ -138,7 +139,9 @@ func RunCrash(cfg CrashConfig) (*CrashReport, error) {
 		return nil, err
 	}
 	ses.digests = append(ses.digests, ses.digest(snap0))
-	snap0.Compact()
+	if !cfg.KeepData {
+		snap0.Compact()
+	}
 	ses.snaps = append(ses.snaps, snap0)
 	for i := 0; i < cfg.Ops; i++ {
 		clk.v = 1000 + int64(i)*10
@@ -157,7 +160,9 @@ func RunCrash(cfg CrashConfig) (*CrashReport, error) {
 			return nil, err
 		}
 		ses.digests = append(ses.digests, ses.digest(s))
-		s.Compact()
+		if !cfg.KeepData {
+			s.Compact()
+		}
 		ses.snaps = append(ses.snaps, s)
 		ses.opText = append(ses.opText, op.String())
 		if op.Kind == "sync" && rEng.Err == nil {
