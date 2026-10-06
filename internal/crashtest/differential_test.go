@@ -23,3 +23,35 @@ func TestDifferential(t *testing.T) {
 		}
 	}
 }
+
+// Big directories: thousands of names spill directories over many blocks and
+// exercise rec_len merging, in-block splitting and the dir index.
+func TestDifferentialBigDirs(t *testing.T) {
+	for _, mode := range []engine.JournalMode{engine.ModeOrdered, engine.ModeData} {
+		t.Run(mode.String(), func(t *testing.T) {
+			t.Parallel()
+			cfg := DefaultDiff(77, mode)
+			cfg.Gen.Names = 600
+			cfg.Gen.MaxData = 1 << 20
+			cfg.Ops = 6000
+			cfg.SnapshotEvery = 500
+			if err := RunDifferential(cfg); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}
+
+// Tiny device: ENOSPC must be reported identically to... itself, i.e. leave
+// the filesystem consistent and usable. (The model has no capacity limit, so
+// this test drives the engine only and relies on fsck.)
+func TestENOSPCConsistency(t *testing.T) {
+	for _, mode := range []engine.JournalMode{engine.ModeOrdered, engine.ModeData} {
+		t.Run(mode.String(), func(t *testing.T) {
+			t.Parallel()
+			if err := RunENOSPC(5, mode); err != nil {
+				t.Fatal(err)
+			}
+		})
+	}
+}

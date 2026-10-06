@@ -73,7 +73,18 @@ func NewGen(cfg GenConfig) *Gen {
 	return &Gen{rng: rand.New(rand.NewSource(cfg.Seed)), cfg: cfg}
 }
 
-func (g *Gen) name() string { return string(rune('a' + g.rng.Intn(g.cfg.Names))) }
+func (g *Gen) name() string {
+	n := g.rng.Intn(g.cfg.Names)
+	if g.cfg.Names <= 26 {
+		return string(rune('a' + n))
+	}
+	// Large name pools grow directories past one block; some names are long
+	// so that directory entries have very different record lengths.
+	if n%7 == 0 {
+		return fmt.Sprintf("long-%0*d", 60+n%190, n)
+	}
+	return fmt.Sprintf("n%d", n)
+}
 
 func pick[T any](g *Gen, xs []T) T { return xs[g.rng.Intn(len(xs))] }
 
@@ -243,6 +254,9 @@ func (g *Gen) Next(m *model.Model) Op {
 		op.A = anyPath()
 	case "open":
 		op.A = anyPath()
+		if len(files) > 0 && g.rng.Intn(10) < 7 {
+			op.A = pick(g, files)
+		}
 		op.Slot = g.rng.Intn(4)
 	case "hread":
 		op.Slot = g.rng.Intn(4)
