@@ -5,8 +5,8 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fuse"
 
-	"github.com/vinayak-singh/walfs/internal/engine"
-	"github.com/vinayak-singh/walfs/internal/format"
+	"github.com/Vinayak069/walfs/internal/engine"
+	"github.com/Vinayak069/walfs/internal/format"
 )
 
 // SnapDirName is the hidden directory under the root through which snapshots

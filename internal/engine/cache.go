@@ -3,8 +3,8 @@ package engine
 import (
 	"sync"
 
-	"github.com/vinayak-singh/walfs/internal/blockdev"
-	"github.com/vinayak-singh/walfs/internal/format"
+	"github.com/Vinayak069/walfs/internal/blockdev"
+	"github.com/Vinayak069/walfs/internal/format"
 )
 
 // buf is one cached device block.

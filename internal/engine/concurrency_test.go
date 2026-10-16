@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/vinayak-singh/walfs/internal/blockdev"
-	"github.com/vinayak-singh/walfs/internal/format"
+	"github.com/Vinayak069/walfs/internal/blockdev"
+	"github.com/Vinayak069/walfs/internal/format"
 )
 
 // Many goroutines hammer the filesystem while commits run in the background.

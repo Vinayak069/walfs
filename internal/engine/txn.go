@@ -7,7 +7,7 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vinayak-singh/walfs/internal/format"
+	"github.com/Vinayak069/walfs/internal/format"
 )
 
 // ---------------------------------------------------------------------------

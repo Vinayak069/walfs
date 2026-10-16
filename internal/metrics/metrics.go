@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/vinayak-singh/walfs/internal/engine"
+	"github.com/Vinayak069/walfs/internal/engine"
 )
 
 // Ops counts filesystem requests; all fields are updated atomically.

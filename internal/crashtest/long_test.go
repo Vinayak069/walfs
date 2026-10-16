@@ -6,7 +6,7 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/vinayak-singh/walfs/internal/engine"
+	"github.com/Vinayak069/walfs/internal/engine"
 )
 
 // TestDifferentialLong is a soak test: WALFS_SOAK=<n> runs n seeds per mode.

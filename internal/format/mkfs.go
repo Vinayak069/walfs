@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/vinayak-singh/walfs/internal/blockdev"
+	"github.com/Vinayak069/walfs/internal/blockdev"
 )
 
 // MkfsOptions controls filesystem creation.

@@ -12,8 +12,8 @@ package crashtest
 import (
 	"sort"
 
-	"github.com/vinayak-singh/walfs/internal/engine"
-	"github.com/vinayak-singh/walfs/internal/model"
+	"github.com/Vinayak069/walfs/internal/engine"
+	"github.com/Vinayak069/walfs/internal/model"
 )
 
 // VFS is the operation surface shared by the engine and the model.

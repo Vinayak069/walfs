@@ -6,9 +6,9 @@ import (
 	"syscall"
 	"testing"
 
-	"github.com/vinayak-singh/walfs/internal/blockdev"
-	"github.com/vinayak-singh/walfs/internal/format"
-	"github.com/vinayak-singh/walfs/internal/fsck"
+	"github.com/Vinayak069/walfs/internal/blockdev"
+	"github.com/Vinayak069/walfs/internal/format"
+	"github.com/Vinayak069/walfs/internal/fsck"
 )
 
 func randBytes(seed int64, n int) []byte {

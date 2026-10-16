@@ -3,7 +3,7 @@ package format
 import (
 	"fmt"
 
-	"github.com/vinayak-singh/walfs/internal/blockdev"
+	"github.com/Vinayak069/walfs/internal/blockdev"
 )
 
 // ---------------------------------------------------------------------------

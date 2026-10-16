@@ -4,7 +4,7 @@ import (
 	"errors"
 	"syscall"
 
-	"github.com/vinayak-singh/walfs/internal/format"
+	"github.com/Vinayak069/walfs/internal/format"
 )
 
 // snapDev is the block device a snapshot view reads from. Reading logical

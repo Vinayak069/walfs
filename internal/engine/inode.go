@@ -3,7 +3,7 @@ package engine
 import (
 	"syscall"
 
-	"github.com/vinayak-singh/walfs/internal/format"
+	"github.com/Vinayak069/walfs/internal/format"
 )
 
 // Ctx carries the caller's credentials.

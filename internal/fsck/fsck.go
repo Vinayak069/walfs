@@ -20,8 +20,8 @@ import (
 	"slices"
 	"strings"
 
-	"github.com/vinayak-singh/walfs/internal/blockdev"
-	"github.com/vinayak-singh/walfs/internal/format"
+	"github.com/Vinayak069/walfs/internal/blockdev"
+	"github.com/Vinayak069/walfs/internal/format"
 )
 
 // Report is the result of a check.

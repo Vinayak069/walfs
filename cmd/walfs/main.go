@@ -20,12 +20,12 @@ import (
 
 	"github.com/hanwen/go-fuse/v2/fuse"
 
-	"github.com/vinayak-singh/walfs/internal/blockdev"
-	"github.com/vinayak-singh/walfs/internal/engine"
-	"github.com/vinayak-singh/walfs/internal/format"
-	"github.com/vinayak-singh/walfs/internal/fsck"
-	"github.com/vinayak-singh/walfs/internal/fusefs"
-	"github.com/vinayak-singh/walfs/internal/metrics"
+	"github.com/Vinayak069/walfs/internal/blockdev"
+	"github.com/Vinayak069/walfs/internal/engine"
+	"github.com/Vinayak069/walfs/internal/format"
+	"github.com/Vinayak069/walfs/internal/fsck"
+	"github.com/Vinayak069/walfs/internal/fusefs"
+	"github.com/Vinayak069/walfs/internal/metrics"
 )
 
 func usage() {

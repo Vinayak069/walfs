@@ -4,7 +4,7 @@ import (
 	"encoding/binary"
 	"syscall"
 
-	"github.com/vinayak-singh/walfs/internal/format"
+	"github.com/Vinayak069/walfs/internal/format"
 )
 
 // ---------------------------------------------------------------------------

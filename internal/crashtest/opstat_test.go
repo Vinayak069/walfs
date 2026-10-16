@@ -5,8 +5,8 @@ import (
 	"sort"
 	"testing"
 
-	"github.com/vinayak-singh/walfs/internal/engine"
-	"github.com/vinayak-singh/walfs/internal/model"
+	"github.com/Vinayak069/walfs/internal/engine"
+	"github.com/Vinayak069/walfs/internal/model"
 )
 
 // TestWorkloadCoverage reports how often each op kind succeeds / fails with

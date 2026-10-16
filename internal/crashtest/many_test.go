@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/vinayak-singh/walfs/internal/engine"
+	"github.com/Vinayak069/walfs/internal/engine"
 )
 
 func TestMany(t *testing.T) {

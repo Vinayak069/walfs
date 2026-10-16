@@ -7,9 +7,9 @@ import (
 	"strings"
 	"syscall"
 
-	"github.com/vinayak-singh/walfs/internal/engine"
-	"github.com/vinayak-singh/walfs/internal/format"
-	"github.com/vinayak-singh/walfs/internal/model"
+	"github.com/Vinayak069/walfs/internal/engine"
+	"github.com/Vinayak069/walfs/internal/format"
+	"github.com/Vinayak069/walfs/internal/model"
 )
 
 // Op is one abstract, path-based filesystem operation.

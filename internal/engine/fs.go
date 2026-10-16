@@ -16,8 +16,8 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/vinayak-singh/walfs/internal/blockdev"
-	"github.com/vinayak-singh/walfs/internal/format"
+	"github.com/Vinayak069/walfs/internal/blockdev"
+	"github.com/Vinayak069/walfs/internal/format"
 )
 
 // JournalMode selects what is written through the journal.

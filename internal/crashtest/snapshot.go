@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/vinayak-singh/walfs/internal/engine"
-	"github.com/vinayak-singh/walfs/internal/format"
+	"github.com/Vinayak069/walfs/internal/engine"
+	"github.com/Vinayak069/walfs/internal/format"
 )
 
 // Node is one entry of a snapshot.

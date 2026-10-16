@@ -5,10 +5,10 @@ import (
 	"fmt"
 	"syscall"
 
-	"github.com/vinayak-singh/walfs/internal/blockdev"
-	"github.com/vinayak-singh/walfs/internal/engine"
-	"github.com/vinayak-singh/walfs/internal/format"
-	"github.com/vinayak-singh/walfs/internal/fsck"
+	"github.com/Vinayak069/walfs/internal/blockdev"
+	"github.com/Vinayak069/walfs/internal/engine"
+	"github.com/Vinayak069/walfs/internal/format"
+	"github.com/Vinayak069/walfs/internal/fsck"
 )
 
 // RunENOSPC fills a small filesystem to the brim with random operations,

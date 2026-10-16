@@ -1,4 +1,4 @@
-module github.com/vinayak-singh/walfs
+module github.com/Vinayak069/walfs
 
 go 1.27.1
 
